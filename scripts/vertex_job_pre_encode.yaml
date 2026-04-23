@@ -1,0 +1,151 @@
+# =============================================================================
+# Vertex AI Custom Training Job — Foundation-1 VAE Pre-Encoding
+# =============================================================================
+#
+# This job runs pre_encode.py on a single A100 40GB GPU to encode all WAV
+# files in your GCS bucket through the frozen OOBLECK VAE, producing 64-token
+# latent tensors for 3-second audio. Output is written back to GCS.
+#
+# Prerequisites:
+#   1. Build and push your Docker image (see Dockerfile):
+#        docker build -t gcr.io/YOUR_PROJECT_ID/dnl-f1-training:latest .
+#        docker push gcr.io/YOUR_PROJECT_ID/dnl-f1-training:latest
+#
+#   2. Replace all YOUR_* placeholders below.
+#
+#   3. Ensure A100 quota in europe-west4:
+#        gcloud compute regions describe europe-west4 \
+#          --project=YOUR_PROJECT_ID | grep -A2 'NVIDIA_A100'
+#      Request quota at: console.cloud.google.com/iam-admin/quotas
+#      Filter: NVIDIA_A100_GPUS, region: europe-west4, request value: 1
+#
+# Submit with:
+#   gcloud ai custom-jobs create \
+#     --region=europe-west4 \
+#     --display-name=foundation1-pre-encode-3s \
+#     --config=scripts/vertex_job_pre_encode.yaml
+#
+# Monitor:
+#   gcloud ai custom-jobs list --region=europe-west4
+#   gcloud ai custom-jobs describe JOB_ID --region=europe-west4
+#
+# Source: https://cloud.google.com/vertex-ai/docs/training/create-custom-job
+# =============================================================================
+
+workerPoolSpecs:
+  - machineSpec:
+      # a2-highgpu-1g: 1× A100 40GB, 12 vCPU, 85 GB RAM
+      # Sufficient for batch_size=32 at 3s (64 latent tokens per sample)
+      # Standard provisioning — no Spot required for this step
+      machineType: a2-highgpu-1g
+      acceleratorType: NVIDIA_TESLA_A100
+      acceleratorCount: 1
+
+    replicaCount: 1
+
+    diskSpec:
+      bootDiskType: pd-ssd
+      # 500 GB: 29 GB for pre-encoded latents + headroom for gcsfuse cache
+      bootDiskSizeGb: 500
+
+    containerSpec:
+      # Replace with your own image URI after building the Dockerfile.
+      # Alternatively, use the DLVM base image (no custom build needed):
+      #   imageUri: us-docker.pkg.dev/deeplearning-platform-release/gcr.io/pytorch-gpu.2-1.py310:latest
+      imageUri: "gcr.io/YOUR_PROJECT_ID/dnl-f1-training:latest"
+
+      # Entry point: mount GCS bucket, install repo, run pre_encode.py
+      command:
+        - bash
+        - -c
+        - |
+          set -euo pipefail
+
+          echo "=== [1/5] Installing gcsfuse ==="
+          apt-get install -y gcsfuse 2>/dev/null || true
+
+          echo "=== [2/5] Cloning repository ==="
+          git clone https://github.com/arsenylosev/dnl-f1-training.git /workspace/dnl-f1-training
+          cd /workspace/dnl-f1-training
+          pip install -e . --quiet
+          pip install google-cloud-storage clearml --quiet
+
+          echo "=== [3/5] Mounting GCS bucket ==="
+          mkdir -p /mnt/gcs
+          gcsfuse --implicit-dirs \
+            --stat-cache-ttl=60s \
+            --type-cache-ttl=60s \
+            "${GCS_BUCKET}" /mnt/gcs
+
+          echo "=== [4/5] Downloading base checkpoint ==="
+          # The OOBLECK VAE weights are embedded in the stable-audio-open-1.0 checkpoint.
+          # Download from GCS if you have it stored there, or from HuggingFace.
+          if gsutil -q stat "gs://${GCS_BUCKET}/checkpoints/stable-audio-open-1.0.ckpt"; then
+            gsutil cp "gs://${GCS_BUCKET}/checkpoints/stable-audio-open-1.0.ckpt" ./stable-audio-open-1.0.ckpt
+          else
+            echo "WARNING: Checkpoint not found in GCS. Attempting HuggingFace download..."
+            pip install huggingface_hub --quiet
+            python3 -c "
+          from huggingface_hub import hf_hub_download
+          hf_hub_download(
+              repo_id='stabilityai/stable-audio-open-1.0',
+              filename='model.safetensors',
+              local_dir='.'
+          )
+          "
+          fi
+
+          echo "=== [5/5] Running VAE pre-encoding ==="
+          python3 pre_encode.py \
+            --model-config models/foundation1_3s/model_config_3s.json \
+            --ckpt-path stable-audio-open-1.0.ckpt \
+            --dataset-config stable_audio_tools/configs/dataset_configs/gcs_f1_3s_pre_encode.json \
+            --output-path /mnt/gcs/pre_encoded_3s/ \
+            --sample-size "${SAMPLE_SIZE}" \
+            --batch-size "${BATCH_SIZE}" \
+            --num-workers "${NUM_WORKERS}" \
+            --num-nodes 1
+
+          echo "=== Pre-encoding complete. Output at gs://${GCS_BUCKET}/pre_encoded_3s/ ==="
+
+      env:
+        # ── Required ──────────────────────────────────────────────────────────
+        - name: GCS_BUCKET
+          value: "YOUR_GCS_BUCKET_NAME"          # e.g. dnl-audio-training
+
+        # ── Pre-encoding hyperparameters ──────────────────────────────────────
+        - name: SAMPLE_SIZE
+          value: "132300"                         # 44100 Hz × 3 s = 132,300 samples
+        - name: BATCH_SIZE
+          value: "32"                             # Safe for A100 40GB at 3s
+        - name: NUM_WORKERS
+          value: "8"                              # 12 vCPUs available; leave 4 for OS
+
+        # ── ClearML experiment tracking (optional) ────────────────────────────
+        # Set to empty string to disable ClearML tracking.
+        # Best practice: inject from GCP Secret Manager instead of hard-coding.
+        - name: CLEARML_API_HOST
+          value: "https://api.clear.ml"
+        - name: CLEARML_API_ACCESS_KEY
+          value: "YOUR_CLEARML_ACCESS_KEY"
+        - name: CLEARML_API_SECRET_KEY
+          value: "YOUR_CLEARML_SECRET_KEY"
+        - name: CLEARML_PROJECT
+          value: "Foundation-1 / DNL"
+        - name: CLEARML_TASK_NAME
+          value: "pre-encode-3s"
+
+# =============================================================================
+# Cost estimate (europe-west4, April 2026):
+#   a2-highgpu-1g on-demand: $3.67/hr
+#   Expected duration:       ~32 hours (3.78M files, batch_size=32)
+#   Total on-demand cost:    ~$117
+#   Spot discount (~65%):    ~$41
+#
+# Note: a2-highgpu-1g supports standard (non-Spot) provisioning.
+# Spot is available but not required — standard is more reliable for a
+# 32-hour unattended run. If you use Spot, add a retry wrapper around
+# pre_encode.py since it does not auto-resume from partial output.
+# The output directory is idempotent: re-running will skip existing .npy files
+# only if you add a skip-existing check (see README_DNL.md).
+# =============================================================================
