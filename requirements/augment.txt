@@ -18,7 +18,7 @@ pydub>=0.25.1
 
 # Audio processing / augmentation
 librosa>=0.10.0,<0.11.0
-audiotools>=0.7.2
+descript-audiotools>=0.7.2
 pedalboard>=0.7.4
 # Note: pedalboard requires libsndfile1-dev (installed by bootstrap_vm.sh)
 
