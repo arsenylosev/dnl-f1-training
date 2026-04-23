@@ -330,10 +330,29 @@ log "Initialising git-lfs..."
 git lfs install --system 2>/dev/null || git lfs install
 
 # ---------------------------------------------------------------------------
-# 10. Create install directory
+# 10. Create install directory and hand ownership to the invoking user
 # ---------------------------------------------------------------------------
+# bootstrap_vm.sh must run as root (sudo) so that apt-get and CUDA driver
+# installation work.  However, ALL subsequent scripts (setup_python_env.sh,
+# smoke_test_gcs.py, train.py) must run as the *login user* — not root.
+#
+# If we leave /opt/dnl owned by root, a non-root pip install into the venv
+# will fail with OSError: [Errno 13] Permission denied.  'sudo pip' does not
+# help because GCE VMs use a restricted secure_path that does not include
+# the venv's bin/ directory, so sudo cannot find 'pip'.
+#
+# Solution: after creating the directory, chown it to $SUDO_USER (the user
+# who invoked sudo).  If the script was run directly as root (no SUDO_USER),
+# we skip the chown so root-only environments still work.
 mkdir -p "$INSTALL_DIR"
-log "Created install directory: $INSTALL_DIR"
+if [ -n "${SUDO_USER:-}" ]; then
+  chown -R "${SUDO_USER}:${SUDO_USER}" "$INSTALL_DIR"
+  log "Created install directory: $INSTALL_DIR (owned by ${SUDO_USER})"
+else
+  log "Created install directory: $INSTALL_DIR (owned by root — running as root directly)"
+  warn "If you plan to run setup_python_env.sh as a non-root user, run:"
+  warn "  sudo chown -R \$USER:\$USER $INSTALL_DIR"
+fi
 
 # ---------------------------------------------------------------------------
 # 11. Verify

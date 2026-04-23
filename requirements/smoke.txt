@@ -1,18 +1,32 @@
 # =============================================================================
 # requirements/smoke.txt — Smoke test only (scripts/smoke_test_gcs.py)
 # =============================================================================
-# Install with: pip install -r requirements/smoke.txt
+# Install with setup_python_env.sh (recommended):
+#   bash scripts/setup_python_env.sh --step smoke
+#
+# The setup script installs torch + torchaudio from the PyTorch CPU index
+# BEFORE installing this file, so the entries below do not need an
+# --index-url.  Do NOT install this file with a bare 'pip install -r'
+# without first installing torch; torchaudio will silently pull in the
+# CPU-only torch from PyPI which may not match the version below.
+#
+# Manual CPU-only install (no GPU / no CUDA drivers required):
+#   pip install torch==2.2.2 torchaudio==2.2.2 \
+#       --index-url https://download.pytorch.org/whl/cpu
+#   pip install -r requirements/smoke.txt
+#
 # No GPU required. Runs on any n2-standard-* or e2-standard-* VM.
-# Estimated install time: ~2 minutes
+# Estimated install time: ~3 minutes (CPU torch wheel is ~200 MB)
 # =============================================================================
+
+# PyTorch — CPU build sufficient for WAV decoding; CUDA not needed here.
+# Installed separately by setup_python_env.sh via the PyTorch CPU index to
+# avoid pulling in NVIDIA CUDA packages (which fail on VMs without GPU drivers).
+torch==2.2.2
+torchaudio==2.2.2
 
 # GCS access
 google-cloud-storage>=2.14.0,<3.0
-
-# Audio loading (WAV decode)
-torchaudio>=2.0.2
-# Note: torch is installed separately via setup_python_env.sh with CUDA index.
-# If running CPU-only: pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 
 # Utilities
 tqdm>=4.66.0

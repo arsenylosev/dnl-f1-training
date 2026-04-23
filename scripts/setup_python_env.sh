@@ -42,7 +42,22 @@ done
 # 1. Create virtualenv
 # ---------------------------------------------------------------------------
 log "Creating virtualenv at ${VENV_DIR}..."
-mkdir -p "$(dirname "$VENV_DIR")"
+
+# Ensure the parent directory exists and is writable by the current user.
+# bootstrap_vm.sh (run as sudo) creates /opt/dnl and chowns it to $SUDO_USER.
+# If that chown did not happen (e.g. bootstrap was run directly as root),
+# the directory will be owned by root and pip installs will fail with
+# OSError: [Errno 13] Permission denied.  Detect this early and abort with
+# a clear message instead of a cryptic pip error deep in the install.
+VENV_PARENT="$(dirname "$VENV_DIR")"
+mkdir -p "$VENV_PARENT"
+if [ ! -w "$VENV_PARENT" ]; then
+  echo "ERROR: $VENV_PARENT is not writable by $(whoami)." >&2
+  echo "       Fix with: sudo chown -R \$USER:\$USER $VENV_PARENT" >&2
+  echo "       Then re-run this script." >&2
+  exit 1
+fi
+
 if [ ! -f "${VENV_DIR}/bin/activate" ]; then
   "$PYTHON_BIN" -m venv "$VENV_DIR"
 fi
@@ -53,8 +68,22 @@ log "Upgrading pip, setuptools, wheel..."
 pip install --upgrade pip setuptools wheel
 
 # ---------------------------------------------------------------------------
-# 2. Install PyTorch (CUDA 12.1 build — compatible with CUDA 12.3 drivers)
+# 2. Install PyTorch
 # ---------------------------------------------------------------------------
+# smoke step: CPU-only torch + torchaudio.  The smoke test only decodes WAV
+# files and reads GCS objects — it does not need CUDA at all.  Installing
+# the CPU wheel avoids the need for CUDA drivers on the smoke VM and removes
+# the NVIDIA package OSError that occurs when pip tries to install CUDA libs
+# without the matching kernel driver present.
+if [[ "$STEP" == "smoke" ]]; then
+  log "Installing PyTorch 2.2 + torchaudio (CPU-only, smoke step)..."
+  pip install --upgrade \
+    torch==2.2.2 \
+    torchaudio==2.2.2 \
+    --index-url https://download.pytorch.org/whl/cpu
+fi
+
+# GPU steps: CUDA 12.1 build — compatible with CUDA 12.3 drivers on GCE VMs
 if [[ "$STEP" == "encode" || "$STEP" == "train" || "$STEP" == "eval" || "$STEP" == "all" ]]; then
   log "Installing PyTorch 2.2 + torchaudio (CUDA 12.1)..."
   pip install --upgrade \
