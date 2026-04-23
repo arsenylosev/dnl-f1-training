@@ -96,12 +96,20 @@ RUN echo "user_allow_other" >> /etc/fuse.conf
 # ---------------------------------------------------------------------------
 # 2. Google Cloud SDK (gcloud, gsutil) + gcsfuse
 # ---------------------------------------------------------------------------
+# Key format note (2024+):
+#   The Google Cloud apt repos require the key saved as a plain ASCII-armored
+#   .asc file (via 'tee'), NOT a dearmored .gpg binary.  Both the Cloud SDK
+#   and gcsfuse source lines must reference it with 'signed-by='.  Using
+#   'gpg --dearmor' and omitting 'signed-by=' from the gcsfuse line causes:
+#     W: GPG error: ... NO_PUBKEY C0BA5CE6DC6315A3
+#     E: The repository ... is not signed.
 RUN curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
-      | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/cloud.google.gpg] \
+      | tee /usr/share/keyrings/cloud.google.asc > /dev/null \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/cloud.google.asc] \
        https://packages.cloud.google.com/apt cloud-sdk main" \
        | tee /etc/apt/sources.list.d/google-cloud-sdk.list \
-    && echo "deb https://packages.cloud.google.com/apt gcsfuse-$(lsb_release -cs) main" \
+    && echo "deb [signed-by=/usr/share/keyrings/cloud.google.asc] \
+       https://packages.cloud.google.com/apt gcsfuse-$(lsb_release -cs) main" \
        | tee /etc/apt/sources.list.d/gcsfuse.list \
     && apt-get update -qq \
     && apt-get install -y --no-install-recommends \
