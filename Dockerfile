@@ -154,7 +154,11 @@ RUN git lfs install --system 2>/dev/null || git lfs install
 # ---------------------------------------------------------------------------
 # 5. Verify installation
 # ---------------------------------------------------------------------------
-RUN python -c "
+# NOTE: Use a heredoc (<<'EOF') so that the Python source lines are NOT
+# parsed by Docker as Dockerfile instructions. A plain RUN python -c "..."
+# with indented continuation lines causes Docker to misparse the indented
+# 'import' keyword as an unknown instruction.
+RUN python3 << 'EOF'
 import torch, torchaudio
 print(f'PyTorch:    {torch.__version__}')
 print(f'torchaudio: {torchaudio.__version__}')
@@ -164,7 +168,7 @@ import soundfile; print('soundfile: OK')
 import librosa; print('librosa: OK')
 import pytorch_lightning as pl; print(f'pytorch-lightning: {pl.__version__}')
 import clearml; print(f'clearml: {clearml.__version__}')
-"
+EOF
 
 # ---------------------------------------------------------------------------
 # 6. Entry point

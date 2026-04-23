@@ -61,36 +61,48 @@ except ImportError:
 
 try:
     import torch
-    import torchaudio
-except ImportError as _e:
-    # ImportError here usually means a missing CUDA shared library (e.g.
-    # libcuda.so.1, libcublas.so) rather than torchaudio being absent.
-    # Print the real exception so the actual cause is visible.
+except Exception as _e:
+    # find_spec only checks whether the package directory exists on disk;
+    # it does NOT attempt to load the C-extension.  A missing CUDA .so
+    # (libcuda.so.1, libcublas.so, etc.) will therefore pass find_spec but
+    # still raise ImportError / OSError here.  Always print the real error.
     import importlib.util as _ilu
-    _torch_present = _ilu.find_spec("torch") is not None
-    _ta_present = _ilu.find_spec("torchaudio") is not None
-    if not _torch_present or not _ta_present:
+    _present = _ilu.find_spec("torch") is not None
+    if not _present:
         print(
-            f"ERROR: {'torch' if not _torch_present else 'torchaudio'} is not installed.\n"
-            f"       Run: pip install torch torchaudio",
+            "ERROR: torch is not installed.\n"
+            "       Run: pip install torch",
             file=sys.stderr,
         )
     else:
         print(
-            f"ERROR: torch/torchaudio failed to import (package IS installed but raised an error).\n"
-            f"       This is usually a CUDA library mismatch or missing shared library.\n"
+            f"ERROR: torch is installed but failed to import.\n"
+            f"       This is usually a CUDA library mismatch or a missing shared\n"
+            f"       library (e.g. libcuda.so.1, libcublas.so).\n"
+            f"       Exception type : {type(_e).__name__}\n"
             f"       Underlying error: {_e}",
             file=sys.stderr,
         )
     sys.exit(1)
+
+try:
+    import torchaudio
 except Exception as _e:
-    # Catch non-ImportError failures (e.g. OSError for missing .so files on
-    # some Linux distributions where dlopen raises OSError instead).
-    print(
-        f"ERROR: torch/torchaudio raised an unexpected error during import.\n"
-        f"       Underlying error ({type(_e).__name__}): {_e}",
-        file=sys.stderr,
-    )
+    import importlib.util as _ilu
+    _present = _ilu.find_spec("torchaudio") is not None
+    if not _present:
+        print(
+            "ERROR: torchaudio is not installed.\n"
+            "       Run: pip install torchaudio",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            f"ERROR: torchaudio is installed but failed to import.\n"
+            f"       Exception type : {type(_e).__name__}\n"
+            f"       Underlying error: {_e}",
+            file=sys.stderr,
+        )
     sys.exit(1)
 
 
