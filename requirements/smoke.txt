@@ -1,0 +1,18 @@
+# =============================================================================
+# requirements/smoke.txt — Smoke test only (scripts/smoke_test_gcs.py)
+# =============================================================================
+# Install with: pip install -r requirements/smoke.txt
+# No GPU required. Runs on any n2-standard-* or e2-standard-* VM.
+# Estimated install time: ~2 minutes
+# =============================================================================
+
+# GCS access
+google-cloud-storage>=2.14.0,<3.0
+
+# Audio loading (WAV decode)
+torchaudio>=2.0.2
+# Note: torch is installed separately via setup_python_env.sh with CUDA index.
+# If running CPU-only: pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+# Utilities
+tqdm>=4.66.0

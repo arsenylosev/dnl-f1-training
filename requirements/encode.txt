@@ -1,0 +1,12 @@
+# =============================================================================
+# requirements/encode.txt — Additional deps for pre_encode.py (VAE encoding)
+# =============================================================================
+# Install AFTER base.txt: pip install -r requirements/encode.txt
+# GPU required (a2-highgpu-1g: 1× A100 40GB recommended).
+# =============================================================================
+
+# PyTorch Lightning (inference / validation loop)
+pytorch-lightning>=2.0.0,<2.2.0
+
+# Progress reporting
+torchmetrics>=0.11.0,<0.12.0

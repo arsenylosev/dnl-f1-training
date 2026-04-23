@@ -1,0 +1,21 @@
+# =============================================================================
+# requirements/train.txt — Additional deps for train.py (DiT fine-tuning)
+# =============================================================================
+# Install AFTER base.txt: pip install -r requirements/train.txt
+# GPU required (a3-highgpu-2g: 2× H100 80GB recommended).
+# =============================================================================
+
+# PyTorch Lightning (training loop)
+pytorch-lightning>=2.0.0,<2.2.0
+
+# Distributed training utilities
+deepspeed>=0.12.0
+# Note: DeepSpeed requires CUDA toolkit headers. On DLVM images these are
+# pre-installed. On bare VMs, install with:
+#   apt-get install -y cuda-toolkit-12-3
+
+# Metrics
+torchmetrics>=0.11.0,<0.12.0
+
+# Gradient checkpointing / memory optimization
+bitsandbytes>=0.41.0

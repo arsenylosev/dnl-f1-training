@@ -7,17 +7,24 @@
 # latent tensors for 3-second audio. Output is written back to GCS.
 #
 # Prerequisites:
-#   1. Build and push your Docker image (see Dockerfile):
-#        docker build -t gcr.io/YOUR_PROJECT_ID/dnl-f1-training:latest .
-#        docker push gcr.io/YOUR_PROJECT_ID/dnl-f1-training:latest
+#   Option A (recommended — faster startup, ~5 min vs ~15 min):
+#     Build and push your Docker image first (see Dockerfile):
+#       gcloud auth configure-docker europe-west4-docker.pkg.dev
+#       docker build -t europe-west4-docker.pkg.dev/YOUR_PROJECT/dnl/f1-training:latest .
+#       docker push europe-west4-docker.pkg.dev/YOUR_PROJECT/dnl/f1-training:latest
+#     Then set imageUri below to your image.
 #
-#   2. Replace all YOUR_* placeholders below.
+#   Option B (no Docker build required — uses public DLVM base image):
+#     Use the commented-out imageUri below. The inline bootstrap script will
+#     install all system packages and Python deps at job start (~15 min).
 #
-#   3. Ensure A100 quota in europe-west4:
-#        gcloud compute regions describe europe-west4 \
-#          --project=YOUR_PROJECT_ID | grep -A2 'NVIDIA_A100'
-#      Request quota at: console.cloud.google.com/iam-admin/quotas
-#      Filter: NVIDIA_A100_GPUS, region: europe-west4, request value: 1
+#   In both cases: replace all YOUR_* placeholders below.
+#
+# Quota check (before submitting):
+#   gcloud compute regions describe europe-west4 --project=YOUR_PROJECT_ID \
+#     | grep -A2 'NVIDIA_A100'
+#   Request quota at: console.cloud.google.com/iam-admin/quotas
+#   Filter: NVIDIA_A100_GPUS, region: europe-west4, request value: 1
 #
 # Submit with:
 #   gcloud ai custom-jobs create \
@@ -36,7 +43,6 @@ workerPoolSpecs:
   - machineSpec:
       # a2-highgpu-1g: 1× A100 40GB, 12 vCPU, 85 GB RAM
       # Sufficient for batch_size=32 at 3s (64 latent tokens per sample)
-      # Standard provisioning — no Spot required for this step
       machineType: a2-highgpu-1g
       acceleratorType: NVIDIA_TESLA_A100
       acceleratorCount: 1
@@ -45,60 +51,103 @@ workerPoolSpecs:
 
     diskSpec:
       bootDiskType: pd-ssd
-      # 500 GB: 29 GB for pre-encoded latents + headroom for gcsfuse cache
+      # 500 GB: 29 GB for pre-encoded latents + gcsfuse cache + model weights
       bootDiskSizeGb: 500
 
     containerSpec:
-      # Replace with your own image URI after building the Dockerfile.
-      # Alternatively, use the DLVM base image (no custom build needed):
-      #   imageUri: us-docker.pkg.dev/deeplearning-platform-release/gcr.io/pytorch-gpu.2-1.py310:latest
-      imageUri: "gcr.io/YOUR_PROJECT_ID/dnl-f1-training:latest"
+      # ── Option A: Use your pre-built image (recommended) ──────────────────
+      # Replace with your Artifact Registry image URI after building:
+      imageUri: "europe-west4-docker.pkg.dev/YOUR_PROJECT_ID/dnl/f1-training:latest"
 
-      # Entry point: mount GCS bucket, install repo, run pre_encode.py
+      # ── Option B: Use public DLVM base image (no Docker build needed) ─────
+      # Uncomment the line below and comment out Option A above.
+      # The inline bootstrap script installs all missing system packages.
+      # imageUri: "us-docker.pkg.dev/deeplearning-platform-release/gcr.io/pytorch-gpu.2-1.py310:latest"
+
+      # Entry point: bootstrap system + Python deps, mount GCS, run pre_encode.py
       command:
         - bash
         - -c
         - |
           set -euo pipefail
 
-          echo "=== [1/5] Installing gcsfuse ==="
-          apt-get install -y gcsfuse 2>/dev/null || true
+          # ── [0/6] System packages ──────────────────────────────────────────
+          # Skip this block if using Option A (pre-built image already has these).
+          # Uncomment if using Option B (DLVM base image).
+          #
+          # echo "=== [0/6] Installing system packages ==="
+          # apt-get update -qq
+          # apt-get install -y --no-install-recommends \
+          #     git git-lfs curl wget gnupg lsb-release software-properties-common \
+          #     build-essential libsndfile1 libsndfile1-dev libsox-fmt-all sox ffmpeg \
+          #     libavcodec-dev libavformat-dev libavutil-dev libswresample-dev \
+          #     libportaudio2 libasound2-dev libflac-dev libvorbis-dev libopus-dev \
+          #     libmp3lame-dev fuse jq rsync pv
+          # rm -rf /var/lib/apt/lists/*
+          # curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
+          #     | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
+          # echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/cloud.google.gpg] \
+          #     https://packages.cloud.google.com/apt cloud-sdk main" \
+          #     | tee /etc/apt/sources.list.d/google-cloud-sdk.list
+          # echo "deb https://packages.cloud.google.com/apt gcsfuse-$(lsb_release -cs) main" \
+          #     | tee /etc/apt/sources.list.d/gcsfuse.list
+          # apt-get update -qq && apt-get install -y google-cloud-cli gcsfuse
+          # echo "user_allow_other" >> /etc/fuse.conf
 
-          echo "=== [2/5] Cloning repository ==="
-          git clone https://github.com/arsenylosev/dnl-f1-training.git /workspace/dnl-f1-training
-          cd /workspace/dnl-f1-training
-          pip install -e . --quiet
-          pip install google-cloud-storage clearml --quiet
+          # ── [1/6] Python packages (skip if using pre-built image) ─────────
+          # Uncomment if using Option B:
+          # pip install --upgrade pip setuptools wheel --quiet
+          # pip install --no-cache-dir -r /workspace/requirements/base.txt --quiet
+          # pip install --no-cache-dir -r /workspace/requirements/encode.txt --quiet
+          # pip install --no-cache-dir -e /workspace/ --no-deps --quiet
 
-          echo "=== [3/5] Mounting GCS bucket ==="
+          echo "=== [2/6] Verifying environment ==="
+          python -c "
+          import torch, torchaudio, soundfile, librosa, pytorch_lightning as pl
+          print(f'PyTorch {torch.__version__} | torchaudio {torchaudio.__version__} | PL {pl.__version__}')
+          print(f'CUDA: {torch.cuda.is_available()} | GPUs: {torch.cuda.device_count()}')
+          if torch.cuda.is_available():
+              print(f'GPU: {torch.cuda.get_device_name(0)}')
+          "
+
+          echo "=== [3/6] Mounting GCS bucket ==="
           mkdir -p /mnt/gcs
           gcsfuse --implicit-dirs \
             --stat-cache-ttl=60s \
             --type-cache-ttl=60s \
+            --file-cache-capacity-mb=4096 \
             "${GCS_BUCKET}" /mnt/gcs
+          echo "GCS bucket mounted at /mnt/gcs"
 
-          echo "=== [4/5] Downloading base checkpoint ==="
-          # The OOBLECK VAE weights are embedded in the stable-audio-open-1.0 checkpoint.
-          # Download from GCS if you have it stored there, or from HuggingFace.
-          if gsutil -q stat "gs://${GCS_BUCKET}/checkpoints/stable-audio-open-1.0.ckpt"; then
-            gsutil cp "gs://${GCS_BUCKET}/checkpoints/stable-audio-open-1.0.ckpt" ./stable-audio-open-1.0.ckpt
+          echo "=== [4/6] Locating base checkpoint ==="
+          CKPT_LOCAL="/workspace/stable-audio-open-1.0.ckpt"
+          CKPT_GCS="gs://${GCS_BUCKET}/checkpoints/stable-audio-open-1.0.ckpt"
+
+          if [ -f "$CKPT_LOCAL" ]; then
+            echo "Checkpoint already present at ${CKPT_LOCAL}"
+          elif gsutil -q stat "${CKPT_GCS}" 2>/dev/null; then
+            echo "Downloading checkpoint from GCS..."
+            gsutil -m cp "${CKPT_GCS}" "${CKPT_LOCAL}"
           else
-            echo "WARNING: Checkpoint not found in GCS. Attempting HuggingFace download..."
+            echo "Checkpoint not in GCS. Downloading from HuggingFace Hub..."
             pip install huggingface_hub --quiet
-            python3 -c "
+            python -c "
           from huggingface_hub import hf_hub_download
-          hf_hub_download(
+          path = hf_hub_download(
               repo_id='stabilityai/stable-audio-open-1.0',
               filename='model.safetensors',
-              local_dir='.'
+              local_dir='/workspace'
           )
+          import os; os.rename(path, '${CKPT_LOCAL}')
+          print(f'Downloaded to ${CKPT_LOCAL}')
           "
           fi
 
-          echo "=== [5/5] Running VAE pre-encoding ==="
-          python3 pre_encode.py \
+          echo "=== [5/6] Running VAE pre-encoding ==="
+          cd /workspace
+          python pre_encode.py \
             --model-config models/foundation1_3s/model_config_3s.json \
-            --ckpt-path stable-audio-open-1.0.ckpt \
+            --ckpt-path "${CKPT_LOCAL}" \
             --dataset-config stable_audio_tools/configs/dataset_configs/gcs_f1_3s_pre_encode.json \
             --output-path /mnt/gcs/pre_encoded_3s/ \
             --sample-size "${SAMPLE_SIZE}" \
@@ -106,7 +155,9 @@ workerPoolSpecs:
             --num-workers "${NUM_WORKERS}" \
             --num-nodes 1
 
-          echo "=== Pre-encoding complete. Output at gs://${GCS_BUCKET}/pre_encoded_3s/ ==="
+          echo "=== [6/6] Pre-encoding complete ==="
+          echo "Output location: gs://${GCS_BUCKET}/pre_encoded_3s/"
+          gsutil du -sh "gs://${GCS_BUCKET}/pre_encoded_3s/" || true
 
       env:
         # ── Required ──────────────────────────────────────────────────────────
@@ -117,13 +168,12 @@ workerPoolSpecs:
         - name: SAMPLE_SIZE
           value: "132300"                         # 44100 Hz × 3 s = 132,300 samples
         - name: BATCH_SIZE
-          value: "32"                             # Safe for A100 40GB at 3s
+          value: "32"                             # Safe for A100 40GB at 3s / 64 tokens
         - name: NUM_WORKERS
           value: "8"                              # 12 vCPUs available; leave 4 for OS
 
         # ── ClearML experiment tracking (optional) ────────────────────────────
-        # Set to empty string to disable ClearML tracking.
-        # Best practice: inject from GCP Secret Manager instead of hard-coding.
+        # Leave empty string to disable. Best practice: inject from Secret Manager.
         - name: CLEARML_API_HOST
           value: "https://api.clear.ml"
         - name: CLEARML_API_ACCESS_KEY
@@ -137,15 +187,11 @@ workerPoolSpecs:
 
 # =============================================================================
 # Cost estimate (europe-west4, April 2026):
-#   a2-highgpu-1g on-demand: $3.67/hr
+#   a2-highgpu-1g on-demand: $3.67/hr (GCE) + ~20.5% Vertex AI fee = ~$4.42/hr
 #   Expected duration:       ~32 hours (3.78M files, batch_size=32)
-#   Total on-demand cost:    ~$117
-#   Spot discount (~65%):    ~$41
+#   Total on-demand cost:    ~$141
+#   Spot discount (~65%):    ~$49
 #
 # Note: a2-highgpu-1g supports standard (non-Spot) provisioning.
-# Spot is available but not required — standard is more reliable for a
-# 32-hour unattended run. If you use Spot, add a retry wrapper around
-# pre_encode.py since it does not auto-resume from partial output.
-# The output directory is idempotent: re-running will skip existing .npy files
-# only if you add a skip-existing check (see README_DNL.md).
+# Standard is recommended for this step — 32h unattended, no auto-resume.
 # =============================================================================

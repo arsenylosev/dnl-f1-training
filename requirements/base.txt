@@ -1,0 +1,70 @@
+# =============================================================================
+# requirements/base.txt — Shared base dependencies (encode + train + eval)
+# =============================================================================
+# Install with: pip install -r requirements/base.txt
+# GPU required. Install AFTER torch+torchaudio (see setup_python_env.sh).
+# System packages required (installed by bootstrap_vm.sh):
+#   libsndfile1, ffmpeg, sox, fuse, gcsfuse, google-cloud-cli
+# Estimated install time: ~8 minutes (many transitive deps)
+# =============================================================================
+
+# GCS access
+google-cloud-storage>=2.14.0,<3.0
+
+# Audio I/O
+soundfile>=0.12.1
+pydub>=0.25.1
+librosa>=0.10.0,<0.11.0
+audiotools>=0.7.2
+soxr>=0.3.7
+
+# Deep learning core (torch + torchaudio installed separately via setup_python_env.sh)
+einops>=0.7.0,<0.8.0
+einops-exts>=0.0.4,<0.1.0
+ema-pytorch>=0.2.3,<0.3.0
+safetensors>=0.4.0
+
+# Transformers / text conditioning
+transformers>=4.35.0,<5.0
+sentencepiece>=0.1.99,<0.2.0
+huggingface_hub>=0.20.0
+
+# Diffusion / generative model utilities
+k-diffusion>=0.1.1,<0.2.0
+v-diffusion-pytorch>=0.0.2,<0.1.0
+x-transformers>=1.26.0,<1.27.0
+local-attention>=1.8.6,<1.9.0
+vector-quantize-pytorch>=1.9.14,<1.10.0
+
+# Audio codec models
+descript-audio-codec>=1.0.0,<1.1.0
+encodec>=0.1.1,<0.2.0
+
+# Audio analysis
+auraloss>=0.4.0,<0.5.0
+aeiou>=0.0.20,<0.1.0
+laion-clap>=1.1.4,<1.2.0
+
+# Signal processing
+alias-free-torch>=0.0.6,<0.1.0
+PyWavelets>=1.4.1,<1.5.0
+scipy==1.8.1
+
+# Utilities
+numpy>=1.24.0,<2.0
+pandas>=2.0.0,<3.0
+matplotlib>=3.7.0,<3.8.0
+tqdm>=4.66.0
+importlib-resources>=5.12.0,<6.0.0
+prefigure>=0.0.9,<0.1.0
+pretty_midi>=0.2.9,<0.3.0
+basic_pitch>=0.3.0
+hffs>=0.2.0
+
+# WebDataset (for s3/wds dataset type)
+webdataset>=0.2.48,<0.3.0
+s3fs>=2023.10.0
+
+# Experiment tracking
+wandb>=0.15.4,<0.16.0
+clearml>=1.14.0

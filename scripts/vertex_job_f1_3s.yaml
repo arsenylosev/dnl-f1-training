@@ -1,57 +1,221 @@
 # =============================================================================
-# Vertex AI Custom Training Job — Foundation-1 3-Second Fine-Tuning
+# Vertex AI Custom Training Job — Foundation-1 DiT Fine-Tuning (3s samples)
 # =============================================================================
-# Submit with:
+#
+# Prerequisites:
+#   1. Pre-encoding complete: gs://YOUR_BUCKET/pre_encoded_3s/ must exist.
+#      Run vertex_job_pre_encode.yaml first.
+#   2. Base checkpoint in GCS: gs://YOUR_BUCKET/checkpoints/stable-audio-open-1.0.ckpt
+#
+#   Option A (recommended — ~5 min startup):
+#     Build and push your Docker image first (see Dockerfile):
+#       gcloud auth configure-docker europe-west4-docker.pkg.dev
+#       docker build -t europe-west4-docker.pkg.dev/YOUR_PROJECT/dnl/f1-training:latest .
+#       docker push europe-west4-docker.pkg.dev/YOUR_PROJECT/dnl/f1-training:latest
+#     Set imageUri below to your image URI.
+#
+#   Option B (no Docker build — ~15 min startup):
+#     Use the commented-out DLVM imageUri. The inline bootstrap block
+#     installs all missing system packages and Python deps at job start.
+#
+# Quota check:
+#   gcloud compute regions describe europe-west4 --project=YOUR_PROJECT_ID \
+#     | grep -A2 'NVIDIA_H100'
+#   Request at: console.cloud.google.com/iam-admin/quotas
+#   Filter: NVIDIA_H100_80GB_GPUS, region: europe-west4, request value: 2
+#
+# Submit:
 #   gcloud ai custom-jobs create \
-#     --region=us-central1 \
-#     --display-name=foundation1-3s-finetune \
+#     --region=europe-west4 \
+#     --display-name=foundation1-finetune-3s \
 #     --config=scripts/vertex_job_f1_3s.yaml
 #
-# Source: https://cloud.google.com/vertex-ai/docs/training/create-custom-job
+# Monitor:
+#   gcloud ai custom-jobs list --region=europe-west4
+#   gcloud ai custom-jobs stream-logs JOB_ID --region=europe-west4
 # =============================================================================
 
 workerPoolSpecs:
   - machineSpec:
-      machineType: a3-highgpu-2g          # 2× H100 80GB, 312 GB RAM, 100 Gbps NIC
+      # a3-highgpu-2g: 2× H100 80GB, 52 vCPU, 234 GB RAM, 200 Gbps NIC
+      machineType: a3-highgpu-2g
       acceleratorType: NVIDIA_H100_80GB
       acceleratorCount: 2
+
     replicaCount: 1
+
+    diskSpec:
+      bootDiskType: pd-ssd
+      bootDiskSizeGb: 500
+
     containerSpec:
-      imageUri: us-docker.pkg.dev/vertex-ai/training/pytorch-gpu.2-1.py310:latest
+      # ── Option A: Pre-built image (recommended) ────────────────────────────
+      imageUri: "europe-west4-docker.pkg.dev/YOUR_PROJECT_ID/dnl/f1-training:latest"
+
+      # ── Option B: Public DLVM base image (uncomment + comment out Option A) ─
+      # imageUri: "us-docker.pkg.dev/deeplearning-platform-release/gcr.io/pytorch-gpu.2-1.py310:latest"
+
       command:
         - bash
-        - scripts/gcp_train_f1_3s.sh
+        - -c
+        - |
+          set -euo pipefail
+
+          # ── [0/7] System packages — OPTION B ONLY ─────────────────────────
+          # Uncomment this entire block if using Option B (DLVM base image).
+          # Skip if using Option A (pre-built image already has all packages).
+          #
+          # echo "=== [0/7] Installing system packages ==="
+          # apt-get update -qq
+          # apt-get install -y --no-install-recommends \
+          #     git git-lfs curl wget gnupg lsb-release software-properties-common \
+          #     build-essential libsndfile1 libsndfile1-dev libsox-fmt-all sox ffmpeg \
+          #     libavcodec-dev libavformat-dev libavutil-dev libswresample-dev \
+          #     libportaudio2 libasound2-dev libflac-dev libvorbis-dev libopus-dev \
+          #     libmp3lame-dev fuse jq rsync pv
+          # rm -rf /var/lib/apt/lists/*
+          # curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
+          #     | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
+          # echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/cloud.google.gpg] \
+          #     https://packages.cloud.google.com/apt cloud-sdk main" \
+          #     | tee /etc/apt/sources.list.d/google-cloud-sdk.list
+          # echo "deb https://packages.cloud.google.com/apt gcsfuse-$(lsb_release -cs) main" \
+          #     | tee /etc/apt/sources.list.d/gcsfuse.list
+          # apt-get update -qq && apt-get install -y google-cloud-cli gcsfuse
+          # echo "user_allow_other" >> /etc/fuse.conf
+
+          # ── [1/7] Python packages — OPTION B ONLY ─────────────────────────
+          # Uncomment if using Option B:
+          # pip install --upgrade pip setuptools wheel --quiet
+          # pip install --no-cache-dir -r /workspace/requirements/base.txt --quiet
+          # pip install --no-cache-dir -r /workspace/requirements/train.txt --quiet
+          # pip install --no-cache-dir -e /workspace/ --no-deps --quiet
+
+          echo "=== [2/7] Verifying environment ==="
+          python -c "
+          import torch, torchaudio, soundfile, pytorch_lightning as pl
+          print(f'PyTorch {torch.__version__} | PL {pl.__version__}')
+          print(f'CUDA: {torch.cuda.is_available()} | GPUs: {torch.cuda.device_count()}')
+          for i in range(torch.cuda.device_count()):
+              props = torch.cuda.get_device_properties(i)
+              print(f'  GPU {i}: {props.name} ({props.total_memory // 1024**3} GB)')
+          "
+
+          echo "=== [3/7] Mounting GCS bucket ==="
+          mkdir -p /mnt/gcs
+          gcsfuse --implicit-dirs \
+            --stat-cache-ttl=60s \
+            --type-cache-ttl=60s \
+            --file-cache-capacity-mb=8192 \
+            "${GCS_BUCKET}" /mnt/gcs
+          echo "GCS bucket mounted at /mnt/gcs"
+
+          echo "=== [4/7] Locating base checkpoint ==="
+          CKPT_LOCAL="/workspace/stable-audio-open-1.0.ckpt"
+          CKPT_GCS="gs://${GCS_BUCKET}/checkpoints/stable-audio-open-1.0.ckpt"
+
+          if [ -f "$CKPT_LOCAL" ]; then
+            echo "Checkpoint already present at ${CKPT_LOCAL}"
+          elif gsutil -q stat "${CKPT_GCS}" 2>/dev/null; then
+            echo "Downloading checkpoint from GCS..."
+            gsutil -m cp "${CKPT_GCS}" "${CKPT_LOCAL}"
+          else
+            echo "Checkpoint not in GCS. Downloading from HuggingFace Hub..."
+            python -c "
+          from huggingface_hub import hf_hub_download
+          path = hf_hub_download(
+              repo_id='stabilityai/stable-audio-open-1.0',
+              filename='model.safetensors',
+              local_dir='/workspace'
+          )
+          import os; os.rename(path, '${CKPT_LOCAL}')
+          print(f'Downloaded to ${CKPT_LOCAL}')
+          "
+          fi
+
+          echo "=== [5/7] Checking for resume checkpoint ==="
+          RESUME_FLAG=""
+          LATEST_CKPT=$(gsutil ls "gs://${GCS_BUCKET}/checkpoints/f1_3s/*.ckpt" 2>/dev/null \
+            | sort | tail -1 || true)
+          if [ -n "$LATEST_CKPT" ]; then
+            echo "Resuming from: $LATEST_CKPT"
+            RESUME_LOCAL="/workspace/resume.ckpt"
+            gsutil -m cp "$LATEST_CKPT" "$RESUME_LOCAL"
+            RESUME_FLAG="--checkpoint-path ${RESUME_LOCAL}"
+          else
+            echo "No resume checkpoint found. Starting from base checkpoint."
+          fi
+
+          echo "=== [6/7] Starting DiT fine-tuning ==="
+          cd /workspace
+          torchrun \
+            --nproc_per_node="${NUM_GPUS}" \
+            --nnodes=1 \
+            --node_rank=0 \
+            train.py \
+            --model-config models/foundation1_3s/model_config_3s.json \
+            --pretrained-ckpt-path "${CKPT_LOCAL}" \
+            --dataset-config stable_audio_tools/configs/dataset_configs/pre_encoded_f1_3s.json \
+            --save-dir /mnt/gcs/checkpoints/f1_3s/ \
+            --name foundation1-3s-finetune \
+            --num-nodes 1 \
+            --batch-size "${BATCH_SIZE}" \
+            --num-workers "${NUM_WORKERS}" \
+            --precision "${PRECISION}" \
+            --use-ema \
+            --ema-decay 0.999 \
+            --demo-every 5000 \
+            --checkpoint-every 10000 \
+            ${RESUME_FLAG}
+
+          echo "=== [7/7] Training complete ==="
+          echo "Checkpoints at: gs://${GCS_BUCKET}/checkpoints/f1_3s/"
+
       env:
+        # ── Required ──────────────────────────────────────────────────────────
         - name: GCS_BUCKET
-          value: "YOUR_GCS_BUCKET_NAME"
-        - name: WANDB_API_KEY
-          value: "YOUR_WANDB_API_KEY"
-        - name: WANDB_PROJECT
-          value: "foundation1-3s-finetune"
-        - name: BATCH_SIZE
-          value: "16"
+          value: "YOUR_GCS_BUCKET_NAME"          # e.g. dnl-audio-training
+
+        # ── Training hyperparameters ──────────────────────────────────────────
         - name: NUM_GPUS
-          value: "2"
+          value: "2"                             # Must match acceleratorCount above
+        - name: BATCH_SIZE
+          value: "16"                            # Per-GPU; effective batch = 16×2 = 32
+        - name: NUM_WORKERS
+          value: "8"                             # 52 vCPUs available; leave headroom
         - name: PRECISION
-          value: "16-mixed"
-        - name: CHECKPOINT_EVERY
-          value: "5000"
-        # ClearML experiment tracking (optional)
-        # Replace the placeholder values with your actual ClearML credentials.
-        # Best practice: use GCP Secret Manager and inject via a wrapper script
-        # rather than hard-coding here.
+          value: "16-mixed"                      # bf16-mixed also supported on H100
+
+        # ── ClearML experiment tracking (optional) ────────────────────────────
         - name: CLEARML_API_HOST
           value: "https://api.clear.ml"
         - name: CLEARML_API_ACCESS_KEY
-          value: "YOUR_CLEARML_ACCESS_KEY"    # Replace or inject from Secret Manager
+          value: "YOUR_CLEARML_ACCESS_KEY"
         - name: CLEARML_API_SECRET_KEY
-          value: "YOUR_CLEARML_SECRET_KEY"    # Replace or inject from Secret Manager
+          value: "YOUR_CLEARML_SECRET_KEY"
         - name: CLEARML_PROJECT
           value: "Foundation-1 / DNL"
+        - name: CLEARML_TASK_NAME
+          value: "finetune-3s"
 
-# Optional: mount the GCS bucket as a persistent disk for faster I/O
-# Uncomment if you prefer gsutil rsync over gcsfuse
-# nfsMount:
-#   server: "YOUR_FILESTORE_IP"
-#   path: "/pre_encoded_3s"
-#   mountPoint: "/mnt/gcs/pre_encoded_3s"
+        # ── W&B tracking (optional) ───────────────────────────────────────────
+        - name: WANDB_API_KEY
+          value: "YOUR_WANDB_API_KEY"
+        - name: WANDB_PROJECT
+          value: "foundation1-3s"
+
+    # ── Spot VM (optional — ~65% cost reduction) ──────────────────────────────
+    # Vertex AI auto-retries up to 6 times on preemption.
+    # Training resumes from latest checkpoint (see [5/7] above).
+    # Uncomment to enable:
+    # scheduling:
+    #   nodePoolSovereign: SPOT
+
+# =============================================================================
+# Cost estimate (europe-west4, April 2026):
+#   a3-highgpu-2g on-demand: ~$23.94/hr (incl. Vertex AI management fee)
+#   a3-highgpu-2g spot:       ~$8.37/hr (incl. Vertex AI management fee)
+#
+#   Minimal viable run (~72h): $1,724 on-demand | $603 spot
+#   Multi-family run (~360h):  $8,618 on-demand | $3,013 spot
+# =============================================================================

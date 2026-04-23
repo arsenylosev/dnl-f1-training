@@ -1,0 +1,18 @@
+# =============================================================================
+# requirements/eval.txt — Evaluation and Gradio demo dependencies
+# =============================================================================
+# Install AFTER base.txt: pip install -r requirements/eval.txt
+# GPU optional (T4 sufficient for inference).
+# =============================================================================
+
+# Gradio demo interface
+gradio>=4.0.0,<5.0.0
+
+# Audio evaluation metrics
+frechet-audio-distance>=0.0.4
+# Note: FAD requires VGGish model weights (~500 MB download on first run)
+
+# Notebook / reporting
+ipython>=8.0.0
+ipykernel>=6.0.0
+jupyter>=1.0.0

@@ -1,0 +1,57 @@
+# =============================================================================
+# .dockerignore — Keep Docker build context lean
+# =============================================================================
+
+# Git history (not needed in container)
+.git/
+.gitignore
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# Model weights (large binary files — mount from GCS at runtime instead)
+*.ckpt
+*.safetensors
+*.pt
+*.pth
+*.bin
+models/*/Foundation_1*
+models/*/stable-audio*
+
+# Pre-encoded latents (large — stored in GCS)
+pre_encoded_3s/
+latents/
+
+# Logs and checkpoints
+*.log
+logs/
+checkpoints/
+wandb/
+clearml_cache/
+
+# IDE and OS files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp

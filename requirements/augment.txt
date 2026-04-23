@@ -1,0 +1,39 @@
+# =============================================================================
+# requirements/augment.txt — Data augmentation pipeline
+# =============================================================================
+# Install with: pip install -r requirements/augment.txt
+# No GPU required. Runs on c2-standard-60 or n2-highcpu-* VMs.
+# System packages required (installed by bootstrap_vm.sh):
+#   libsndfile1, sox, ffmpeg, libsox-fmt-all
+# Estimated install time: ~4 minutes
+# =============================================================================
+
+# GCS access
+google-cloud-storage>=2.14.0,<3.0
+
+# Audio I/O
+soundfile>=0.12.1
+pydub>=0.25.1
+# Note: pydub requires ffmpeg on PATH (installed by bootstrap_vm.sh)
+
+# Audio processing / augmentation
+librosa>=0.10.0,<0.11.0
+audiotools>=0.7.2
+pedalboard>=0.7.4
+# Note: pedalboard requires libsndfile1-dev (installed by bootstrap_vm.sh)
+
+# Pitch / key transposition
+pyrubberband>=0.3.0
+# Note: pyrubberband requires rubberband-cli: apt-get install -y rubberband-cli
+
+# Scientific computing
+numpy>=1.24.0,<2.0
+scipy==1.8.1
+pandas>=2.0.0,<3.0
+
+# Metadata / CSV handling
+pyarrow>=12.0.0
+
+# Utilities
+tqdm>=4.66.0
+joblib>=1.3.0
