@@ -1,0 +1,45 @@
+# =============================================================================
+# Vertex AI Custom Training Job — Foundation-1 3-Second Fine-Tuning
+# =============================================================================
+# Submit with:
+#   gcloud ai custom-jobs create \
+#     --region=us-central1 \
+#     --display-name=foundation1-3s-finetune \
+#     --config=scripts/vertex_job_f1_3s.yaml
+#
+# Source: https://cloud.google.com/vertex-ai/docs/training/create-custom-job
+# =============================================================================
+
+workerPoolSpecs:
+  - machineSpec:
+      machineType: a3-highgpu-2g          # 2× H100 80GB, 312 GB RAM, 100 Gbps NIC
+      acceleratorType: NVIDIA_H100_80GB
+      acceleratorCount: 2
+    replicaCount: 1
+    containerSpec:
+      imageUri: us-docker.pkg.dev/vertex-ai/training/pytorch-gpu.2-1.py310:latest
+      command:
+        - bash
+        - scripts/gcp_train_f1_3s.sh
+      env:
+        - name: GCS_BUCKET
+          value: "YOUR_GCS_BUCKET_NAME"
+        - name: WANDB_API_KEY
+          value: "YOUR_WANDB_API_KEY"
+        - name: WANDB_PROJECT
+          value: "foundation1-3s-finetune"
+        - name: BATCH_SIZE
+          value: "16"
+        - name: NUM_GPUS
+          value: "2"
+        - name: PRECISION
+          value: "16-mixed"
+        - name: CHECKPOINT_EVERY
+          value: "5000"
+
+# Optional: mount the GCS bucket as a persistent disk for faster I/O
+# Uncomment if you prefer gsutil rsync over gcsfuse
+# nfsMount:
+#   server: "YOUR_FILESTORE_IP"
+#   path: "/pre_encoded_3s"
+#   mountPoint: "/mnt/gcs/pre_encoded_3s"

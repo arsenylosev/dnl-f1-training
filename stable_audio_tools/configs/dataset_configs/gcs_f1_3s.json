@@ -1,0 +1,20 @@
+{
+  "_comment": "Dataset config for Foundation-1 3-second fine-tuning from GCS. Uses the custom 'gcs' dataset type added in this fork. Requires Application Default Credentials (ADC) — automatic on Vertex AI / GCE.",
+  "_source": "https://cloud.google.com/docs/authentication/application-default-credentials",
+
+  "dataset_type": "gcs",
+  "random_crop": false,
+
+  "datasets": [
+    {
+      "id": "f1_train",
+      "bucket": "YOUR_GCS_BUCKET_NAME",
+      "prefix": "training_datasets/f1_initial/train/"
+    },
+    {
+      "id": "f1_valid",
+      "bucket": "YOUR_GCS_BUCKET_NAME",
+      "prefix": "training_datasets/f1_initial/valid/"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "_comment": "Dataset config used ONLY during the pre-encoding step (pre_encode.py). After pre-encoding, switch to the pre_encoded dataset config. Uses the 'gcs' type to stream WAV files from GCS for VAE encoding.",
+
+  "dataset_type": "gcs",
+  "random_crop": false,
+
+  "datasets": [
+    {
+      "id": "f1_train_encode",
+      "bucket": "YOUR_GCS_BUCKET_NAME",
+      "prefix": "training_datasets/f1_initial/train/"
+    },
+    {
+      "id": "f1_valid_encode",
+      "bucket": "YOUR_GCS_BUCKET_NAME",
+      "prefix": "training_datasets/f1_initial/valid/"
+    }
+  ]
+}

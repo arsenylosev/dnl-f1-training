@@ -1,0 +1,15 @@
+{
+  "_comment": "Dataset config for Foundation-1 DiT fine-tuning using pre-encoded latents. Use this AFTER running pre_encode.py. The path should point to the local directory (or gcsfuse mount) where pre_encode.py wrote its .npy + .json output.",
+  "_source": "https://github.com/Stability-AI/stable-audio-tools/blob/main/docs/pre_encoding.md",
+
+  "dataset_type": "pre_encoded",
+  "random_crop": false,
+
+  "datasets": [
+    {
+      "id": "f1_pre_encoded_3s",
+      "path": "/mnt/gcs/pre_encoded_3s/",
+      "latent_crop_length": 64
+    }
+  ]
+}
