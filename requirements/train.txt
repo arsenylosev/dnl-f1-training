@@ -6,7 +6,7 @@
 # =============================================================================
 
 # PyTorch Lightning (training loop)
-pytorch-lightning>=2.0.0,<2.2.0
+pytorch-lightning>=2.0.0,<2.7.0
 
 # Distributed training utilities
 deepspeed>=0.12.0
@@ -15,7 +15,7 @@ deepspeed>=0.12.0
 #   apt-get install -y cuda-toolkit-12-3
 
 # Metrics
-torchmetrics>=0.11.0,<0.12.0
+torchmetrics>=1.0.0,<2.0.0
 
 # Gradient checkpointing / memory optimization
 bitsandbytes>=0.41.0

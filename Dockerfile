@@ -160,7 +160,22 @@ RUN chmod +x /workspace/scripts/*.sh
 RUN git lfs install --system 2>/dev/null || git lfs install
 
 # ---------------------------------------------------------------------------
-# 5. Verify installation
+# 5. Align torchvision with the installed torch version
+# ---------------------------------------------------------------------------
+# The NVIDIA base image ships torchvision built against its bundled torch 2.2.
+# After upgrading torch (via requirements/), the old torchvision crashes on
+# import with:
+#   RuntimeError: operator torchvision::nms does not exist
+# because its compiled C++ extension references ops that no longer exist in
+# the new torch dispatcher. Upgrading torchvision here ensures it is rebuilt
+# against the current torch ABI. The --extra-index-url is needed so pip can
+# find CUDA-enabled torchvision wheels from the PyTorch index.
+RUN pip install --no-cache-dir --upgrade \
+    torchvision \
+    --extra-index-url https://download.pytorch.org/whl/cu121
+
+# ---------------------------------------------------------------------------
+# 6. Verify installation
 # ---------------------------------------------------------------------------
 # NOTE: Use a heredoc (<<'EOF') so that the Python source lines are NOT
 # parsed by Docker as Dockerfile instructions. A plain RUN python -c "..."
@@ -179,7 +194,7 @@ import clearml; print(f'clearml: {clearml.__version__}')
 EOF
 
 # ---------------------------------------------------------------------------
-# 6. Entry point
+# 7. Entry point
 # ---------------------------------------------------------------------------
 # STEP env var controls which pipeline stage runs:
 #   STEP=train   → runs train.py via gcp_train_f1_3s.sh (default)
