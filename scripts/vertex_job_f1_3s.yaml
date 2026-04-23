@@ -36,6 +36,18 @@ workerPoolSpecs:
           value: "16-mixed"
         - name: CHECKPOINT_EVERY
           value: "5000"
+        # ClearML experiment tracking (optional)
+        # Replace the placeholder values with your actual ClearML credentials.
+        # Best practice: use GCP Secret Manager and inject via a wrapper script
+        # rather than hard-coding here.
+        - name: CLEARML_API_HOST
+          value: "https://api.clear.ml"
+        - name: CLEARML_API_ACCESS_KEY
+          value: "YOUR_CLEARML_ACCESS_KEY"    # Replace or inject from Secret Manager
+        - name: CLEARML_API_SECRET_KEY
+          value: "YOUR_CLEARML_SECRET_KEY"    # Replace or inject from Secret Manager
+        - name: CLEARML_PROJECT
+          value: "Foundation-1 / DNL"
 
 # Optional: mount the GCS bucket as a persistent disk for faster I/O
 # Uncomment if you prefer gsutil rsync over gcsfuse

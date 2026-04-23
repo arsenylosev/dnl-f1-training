@@ -39,6 +39,7 @@ RUN pip install --no-cache-dir \
     huggingface_hub \
     safetensors \
     wandb \
+    clearml \
     && pip install --no-cache-dir -e ".[train]" \
     || pip install --no-cache-dir \
         aeiou \
@@ -71,6 +72,7 @@ RUN pip install --no-cache-dir \
         v-diffusion-pytorch \
         vector-quantize-pytorch \
         wandb \
+        clearml \
         webdataset \
         x-transformers \
         basic_pitch \

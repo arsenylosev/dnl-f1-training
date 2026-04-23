@@ -12,6 +12,10 @@ from stable_audio_tools.data.dataset import create_dataloader_from_config
 from stable_audio_tools.models.factory import create_model_from_config
 from stable_audio_tools.models.pretrained import get_pretrained_model
 from stable_audio_tools.models.utils import load_ckpt_state_dict, copy_state_dict
+from stable_audio_tools.training.clearml_tracking import (
+    init_clearml_pre_encode_task,
+    ClearMLPreEncodeCallback,
+)
 
 
 def load_model(model_config=None, model_ckpt_path=None, pretrained_name=None, model_half=False):
@@ -158,6 +162,13 @@ def main(args):
         args_dict=vars(args)
     )
 
+    # ClearML: track the pre-encoding run (no-op if ClearML is not installed)
+    clearml_task = init_clearml_pre_encode_task(args, model_config, dataset_config)
+    clearml_pre_encode_callback = ClearMLPreEncodeCallback(
+        task=clearml_task,
+        total_batches=args.limit_batches,
+    )
+
     trainer = pl.Trainer(
         accelerator="gpu",
         devices="auto",
@@ -167,6 +178,7 @@ def main(args):
         max_steps=args.limit_batches if args.limit_batches else -1,
         logger=False,  # Disable logging since we're just doing inference
         enable_checkpointing=False,
+        callbacks=[clearml_pre_encode_callback],
     )
     trainer.validate(pl_module, data_loader)
 

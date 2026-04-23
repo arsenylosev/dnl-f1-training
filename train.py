@@ -11,6 +11,13 @@ from stable_audio_tools.models.utils import load_ckpt_state_dict, remove_weight_
 from stable_audio_tools.training import create_training_wrapper_from_config, create_demo_callback_from_config
 from stable_audio_tools.training.utils import copy_state_dict
 
+# ClearML experiment tracking (optional — gracefully disabled if not installed
+# or if CLEARML_API_ACCESS_KEY / CLEARML_API_SECRET_KEY are not set).
+from stable_audio_tools.training.clearml_tracking import (
+    init_clearml_task,
+    ClearMLTrainingCallback,
+)
+
 class ExceptionCallback(pl.Callback):
     def on_exception(self, trainer, module, err):
         print(f'{type(err).__name__}: {err}')
@@ -68,6 +75,18 @@ def main():
 
     training_wrapper = create_training_wrapper_from_config(model_config, model)
 
+    # ---- ClearML: initialise task before W&B so both trackers are active ----
+    # ClearML auto-captures: source code, git diff, installed packages,
+    # TensorBoard/W&B scalars, PyTorch model snapshots, and console output.
+    # Requires CLEARML_API_HOST, CLEARML_API_ACCESS_KEY, CLEARML_API_SECRET_KEY
+    # to be set in the environment (or in clearml.conf on the training machine).
+    # If ClearML is not installed or credentials are absent, this is a no-op.
+    clearml_task = init_clearml_task(args, model_config, dataset_config)
+    clearml_callback = ClearMLTrainingCallback(
+        task=clearml_task,
+        log_every_n_steps=100,
+    )
+
     wandb_logger = pl.loggers.WandbLogger(project=args.name)
     wandb_logger.watch(training_wrapper)
 
@@ -113,7 +132,7 @@ def main():
         strategy=strategy,
         precision=args.precision,
         accumulate_grad_batches=args.accum_batches, 
-        callbacks=[ckpt_callback, demo_callback, exc_callback, save_model_config_callback],
+        callbacks=[ckpt_callback, demo_callback, exc_callback, save_model_config_callback, clearml_callback],
         logger=wandb_logger,
         log_every_n_steps=1,
         max_epochs=10000000,

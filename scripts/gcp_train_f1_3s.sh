@@ -40,6 +40,26 @@ CHECKPOINT_EVERY=5000 # Save a checkpoint every N steps.
 WANDB_PROJECT="foundation1-3s-finetune"
 
 # ---------------------------------------------------------------------------
+# ClearML experiment tracking (optional)
+# ---------------------------------------------------------------------------
+# Leave CLEARML_API_ACCESS_KEY and CLEARML_API_SECRET_KEY empty to disable
+# ClearML tracking entirely. When set, every training run and pre-encoding
+# run will be logged to your ClearML server automatically.
+#
+# Best practice: pass these as Vertex AI environment variables or store in
+# GCP Secret Manager instead of hard-coding here.
+#
+# Get credentials from: https://app.clear.ml/settings/workspace-configuration
+export CLEARML_API_HOST="${CLEARML_API_HOST:-https://api.clear.ml}"
+export CLEARML_API_ACCESS_KEY="${CLEARML_API_ACCESS_KEY:-}"     # Set this
+export CLEARML_API_SECRET_KEY="${CLEARML_API_SECRET_KEY:-}"     # Set this
+export CLEARML_PROJECT="${CLEARML_PROJECT:-Foundation-1 / DNL}"
+export CLEARML_TASK_NAME="${CLEARML_TASK_NAME:-f1-3s-finetune-$(date +%Y%m%d-%H%M)}"
+
+# Install ClearML if not already present
+pip install --quiet clearml 2>/dev/null || true
+
+# ---------------------------------------------------------------------------
 # STEP 0 — Verify environment
 # ---------------------------------------------------------------------------
 
