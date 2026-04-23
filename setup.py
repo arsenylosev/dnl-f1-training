@@ -35,7 +35,7 @@ setup(
         'sentencepiece<=0.1.99',
         's3fs',
         'soxr',
-        'scipy==1.8.1', 
+        'scipy>=1.8.1,<1.14',  # relaxed: enables Py3.11 wheels; API stable across 1.8-1.13 for all usages (scipy.signal, scipy.optimize.fmin)
         'torch>=2.0.1',
         'torchaudio>=2.0.2',
         'torchmetrics<=0.11.4',

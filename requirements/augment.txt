@@ -28,7 +28,7 @@ pyrubberband>=0.3.0
 
 # Scientific computing
 numpy>=1.24.0,<2.0
-scipy==1.8.1
+scipy>=1.8.1,<1.14  # relaxed: enables Py3.11 pre-built wheels; API stable across 1.8-1.13
 pandas>=2.0.0,<3.0
 
 # Metadata / CSV handling

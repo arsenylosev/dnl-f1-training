@@ -18,7 +18,11 @@
 # =============================================================================
 set -euo pipefail
 
-PYTHON_VERSION="${PYTHON_VERSION:-3.10}"
+# Python 3.11 is the default: it is native on Debian 12 (Bookworm) and Ubuntu 22.04.
+# scipy==1.8.1 (the original pin) has no pre-built wheel for Python 3.11.
+# setup.py has been patched to scipy>=1.8.1,<1.14 which resolves this.
+# If you need Python 3.10 for any reason, set: PYTHON_VERSION=3.10 before running.
+PYTHON_VERSION="${PYTHON_VERSION:-3.11}"
 PYTHON_BIN="python${PYTHON_VERSION}"
 VENV_DIR="${VENV_DIR:-/opt/dnl/venv}"
 STEP="${1:-all}"
