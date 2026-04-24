@@ -13,8 +13,8 @@
 # Techniques used here:
 #   1. Remove large unused packages from the base image in the very first layer
 #      (apex, transformer-engine, nsight tools, CUDA samples) — saves ~3-4 GB.
-#   2. Merge all pip install steps into ONE RUN command and purge the pip cache
-#      inside the same command — avoids duplicate layer blobs.
+#   2. Merge all pip install steps into ONE RUN command — avoids duplicate layer blobs.
+#      All installs use --no-cache-dir so no cache is written to any layer.
 #   3. Merge small housekeeping RUN steps (fuse.conf, chmod, git-lfs) into
 #      adjacent layers to reduce total snapshot count.
 #   4. Use --no-cache-dir on every pip call and clean apt lists after every
@@ -53,7 +53,6 @@ RUN pip uninstall -y \
         transformer-engine \
         pynvml \
     2>/dev/null || true \
-    && pip cache purge \
     && apt-get purge -y --auto-remove \
         nsight-systems-* \
         nsight-compute-* \
@@ -136,11 +135,13 @@ RUN curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
     && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------
-# 3. Python packages  (single RUN layer — pip cache purged at the end)
+# 3. Python packages  (single RUN layer)
 # ---------------------------------------------------------------------------
 # All pip installs are merged into one RUN command so Docker creates only one
-# overlay diff instead of four.  The pip cache is purged inside the same
-# command so it is never committed to any layer.
+# overlay diff instead of four.  Every install uses --no-cache-dir so nothing
+# is written to the pip cache.  We do NOT call 'pip cache purge' because Cloud
+# Build disables the pip cache globally (PIP_NO_CACHE_DIR=1) and the purge
+# command exits with code 1 when the cache is disabled.
 #
 # Install order:
 #   a) pip/setuptools/wheel upgrade
@@ -172,7 +173,6 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
         torchvision \
         --extra-index-url https://download.pytorch.org/whl/cu121 \
     \
-    && pip cache purge \
     && find /usr/local/lib/python3.10 -name '*.pyc' -delete \
     && find /usr/local/lib/python3.10 -name '__pycache__' -type d -empty -delete
 
@@ -183,7 +183,6 @@ COPY . /workspace/
 
 RUN pip install --no-cache-dir -e /workspace/ --no-deps \
         || echo "WARNING: editable install failed, continuing (deps already installed above)" \
-    && pip cache purge \
     && chmod +x /workspace/scripts/*.sh \
     && git lfs install --system 2>/dev/null || git lfs install
 
