@@ -1,7 +1,10 @@
 # =============================================================================
 # Dockerfile — Foundation-1 Training Container (DNL fork)
 # =============================================================================
-# Base:  NVIDIA PyTorch 24.01 (CUDA 12.3.2, PyTorch 2.2, Python 3.10, Ubuntu 22.04)
+# Base:  NVIDIA PyTorch 24.04 (CUDA 12.4.1, PyTorch 2.3, Python 3.10, Ubuntu 22.04)
+# Driver requirement: >= 525.85 (Vertex AI A100 VMs ship driver 525.x — compatible)
+# DO NOT upgrade this base image past 24.04 until Vertex AI A100 VMs ship driver >= 550
+# (required for CUDA 12.6+).  See: https://docs.nvidia.com/deeplearning/frameworks/pytorch-release-notes/
 # Source: https://catalog.ngc.nvidia.com/orgs/nvidia/containers/pytorch
 #
 # SIZE OPTIMISATION NOTES
@@ -32,7 +35,11 @@
 #     europe-west4-docker.pkg.dev/YOUR_PROJECT/dnl/f1-training:latest
 # =============================================================================
 
-FROM nvcr.io/nvidia/pytorch:24.01-py3
+# CUDA 12.4.1 — requires driver >= 525.85
+# Vertex AI A100 VMs (europe-west4) ship driver 525.x (CUDA 12.3 runtime),
+# which satisfies the 525.85 minimum for this image.
+# Do NOT bump past 24.04 until Vertex AI upgrades its A100 driver to >= 550.
+FROM nvcr.io/nvidia/pytorch:24.04-py3
 
 # Prevent interactive prompts during apt-get
 ENV DEBIAN_FRONTEND=noninteractive
@@ -149,10 +156,10 @@ RUN curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
 #   c) requirements/base.txt  (audio libs, transformers, diffusion utils)
 #   d) requirements/encode.txt (pytorch-lightning, torchmetrics)
 #   e) requirements/train.txt  (deepspeed, bitsandbytes)
-#   f) torchvision upgrade — the base image ships torchvision 0.17 built for
-#      torch 2.2; after our installs upgrade torch to 2.11 the old torchvision
-#      crashes with "operator torchvision::nms does not exist".  Upgrading it
-#      here (in the same layer) avoids an extra snapshot.
+#   f) torch==2.6.0 + torchaudio==2.6.0 + torchvision==0.21.0 pinned to cu124.
+#      The NGC PyPI index now serves torch 2.11+cu130 (CUDA 13.0 nightly),
+#      which requires driver >= 570.  Vertex AI A100 VMs ship driver 525.x
+#      (CUDA 12.3), so we override with the stable cu124 wheel instead.
 
 COPY requirements/ /workspace/requirements/
 
@@ -169,9 +176,16 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
     && pip install --no-cache-dir -r /workspace/requirements/encode.txt \
     && pip install --no-cache-dir -r /workspace/requirements/train.txt \
     \
-    && pip install --no-cache-dir --upgrade \
-        torchvision \
-        --extra-index-url https://download.pytorch.org/whl/cu121 \
+    # Pin torch/torchaudio to stable CUDA 12.4 builds.
+    # The NGC PyPI index (pypi.ngc.nvidia.com) now serves torch 2.11+cu130
+    # (CUDA 13.0 nightly), which requires driver >= 570 — not available on
+    # Vertex AI A100 VMs.  We override with the stable cu124 wheel from
+    # download.pytorch.org, which needs driver >= 525.60 (satisfied).
+    && pip install --no-cache-dir \
+        "torch==2.6.0" \
+        "torchaudio==2.6.0" \
+        "torchvision==0.21.0" \
+        --index-url https://download.pytorch.org/whl/cu124 \
     \
     && find /usr/local/lib/python3.10 -name '*.pyc' -delete \
     && find /usr/local/lib/python3.10 -name '__pycache__' -type d -empty -delete
