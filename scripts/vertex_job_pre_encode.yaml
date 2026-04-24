@@ -116,12 +116,36 @@ workerPoolSpecs:
           elif gsutil -q stat "${CKPT_GCS}" 2>/dev/null; then
             echo "Downloading checkpoint from GCS..."
             gsutil -m cp "${CKPT_GCS}" "${CKPT_LOCAL}"
+            echo "Checkpoint downloaded: ${CKPT_LOCAL}"
           else
-            echo "Checkpoint not in GCS. Downloading from HuggingFace Hub..."
+            # ── HuggingFace fallback ──────────────────────────────────────────
+            # stable-audio-open-1.0 is a GATED model. You must:
+            #   1. Accept the license at https://huggingface.co/stabilityai/stable-audio-open-1.0
+            #   2. Generate a read token at https://huggingface.co/settings/tokens
+            #   3. Set HUGGINGFACE_TOKEN in the env block below.
+            # RECOMMENDED: upload the checkpoint to GCS once instead:
+            #   gsutil cp /path/to/stable-audio-open-1.0.ckpt \
+            #     gs://${GCS_BUCKET}/checkpoints/stable-audio-open-1.0.ckpt
+            # Then this fallback will never be reached.
+            if [ -z "${HUGGINGFACE_TOKEN:-}" ]; then
+              echo "ERROR: Checkpoint not found in GCS and HUGGINGFACE_TOKEN is not set." >&2
+              echo "       Either upload the checkpoint to GCS:" >&2
+              echo "         gsutil cp stable-audio-open-1.0.ckpt gs://\${GCS_BUCKET}/checkpoints/" >&2
+              echo "       Or set HUGGINGFACE_TOKEN in the env block of this YAML." >&2
+              exit 1
+            fi
+            echo "Checkpoint not in GCS. Downloading from HuggingFace Hub (gated repo)..."
             python3 -c "from huggingface_hub import hf_hub_download; import os; \
-              path = hf_hub_download(repo_id='stabilityai/stable-audio-open-1.0', filename='model.safetensors', local_dir='/workspace'); \
+              path = hf_hub_download( \
+                repo_id='stabilityai/stable-audio-open-1.0', \
+                filename='model.safetensors', \
+                local_dir='/workspace', \
+                token=os.environ['HUGGINGFACE_TOKEN']); \
               os.rename(path, '${CKPT_LOCAL}'); \
               print('Downloaded to ${CKPT_LOCAL}')"
+            # Cache to GCS so future runs skip this step
+            echo "Caching checkpoint to GCS for future runs..."
+            gsutil -m cp "${CKPT_LOCAL}" "${CKPT_GCS}" || true
           fi
 
           echo "=== [4/5] Running VAE pre-encoding ==="
@@ -161,6 +185,15 @@ workerPoolSpecs:
           value: "32"                             # Safe for A100 40GB at 3s / 64 tokens
         - name: NUM_WORKERS
           value: "8"                              # 12 vCPUs available; leave 4 for OS
+
+        # ── HuggingFace (required only if checkpoint is NOT already in GCS) ─────
+        # stable-audio-open-1.0 is a gated model. To use the HF fallback:
+        #   1. Accept license: https://huggingface.co/stabilityai/stable-audio-open-1.0
+        #   2. Create read token: https://huggingface.co/settings/tokens
+        #   3. Set the value below.
+        # Leave empty ("") if the checkpoint is already in GCS (recommended).
+        - name: HUGGINGFACE_TOKEN
+          value: ""                               # YOUR_HF_READ_TOKEN or leave empty
 
         # ── ClearML experiment tracking (optional) ────────────────────────────
         # Leave empty string to disable. Best practice: inject from Secret Manager.
