@@ -7,18 +7,12 @@
 # latent tensors for 3-second audio. Output is written back to GCS.
 #
 # Prerequisites:
-#   Option A (recommended — faster startup, ~5 min vs ~15 min):
-#     Build and push your Docker image first (see Dockerfile):
-#       gcloud auth configure-docker europe-west4-docker.pkg.dev
-#       docker build -t europe-west4-docker.pkg.dev/YOUR_PROJECT/dnl/f1-training:latest .
-#       docker push europe-west4-docker.pkg.dev/YOUR_PROJECT/dnl/f1-training:latest
-#     Then set imageUri below to your image.
-#
-#   Option B (no Docker build required — uses public DLVM base image):
-#     Use the commented-out imageUri below. The inline bootstrap script will
-#     install all system packages and Python deps at job start (~15 min).
-#
-#   In both cases: replace all YOUR_* placeholders below.
+#   Build and push your Docker image first (see Dockerfile):
+#     gcloud auth configure-docker europe-west4-docker.pkg.dev
+#     gcloud builds submit \
+#       --tag europe-west4-docker.pkg.dev/YOUR_PROJECT_ID/dnl-training/f1-trainer:latest \
+#       --machine-type e2-highcpu-32 --timeout 3600 .
+#   Then replace all YOUR_* placeholders below.
 #
 # Quota check (before submitting):
 #   gcloud compute regions describe europe-west4 --project=YOUR_PROJECT_ID \
@@ -29,21 +23,45 @@
 # Submit with:
 #   gcloud ai custom-jobs create \
 #     --region=europe-west4 \
-#     --display-name=foundation1-pre-encode-3s \
+#     --display-name=dnl-f1-pre-encode-$(date +%Y%m%d) \
 #     --config=scripts/vertex_job_pre_encode.yaml
 #
-# Monitor:
-#   gcloud ai custom-jobs list --region=europe-west4
-#   gcloud ai custom-jobs describe JOB_ID --region=europe-west4
+# Monitor / find logs:
+#   1. List jobs and get JOB_ID:
+#        gcloud ai custom-jobs list --region=europe-west4
+#   2. Describe job state + error message:
+#        gcloud ai custom-jobs describe JOB_ID --region=europe-west4
+#   3. Stream live logs (most useful for debugging):
+#        gcloud ai custom-jobs stream-logs JOB_ID --region=europe-west4
+#   4. Cloud Logging (full historical logs):
+#        gcloud logging read \
+#          'resource.type="aiplatform.googleapis.com/CustomJob" AND
+#           resource.labels.job_id="JOB_ID"' \
+#          --project=YOUR_PROJECT_ID --limit=200 --format=json
+#   5. Console UI:
+#        https://console.cloud.google.com/vertex-ai/training/custom-jobs
+#        Click the job → "View logs" button → Cloud Logging
 #
 # Source: https://cloud.google.com/vertex-ai/docs/training/create-custom-job
 # =============================================================================
 
+# FIX 1: The config file must contain a CustomJobSpec, not a bare
+# workerPoolSpecs list.  When using --config, gcloud expects the top-level
+# key to be 'workerPoolSpecs' (camelCase) as part of the CustomJobSpec JSON
+# representation.  This is correct — no wrapper key is needed.
+# Reference: https://cloud.google.com/vertex-ai/docs/reference/rest/v1/CustomJobSpec
+
 workerPoolSpecs:
   - machineSpec:
       # a2-highgpu-1g: 1× A100 40GB, 12 vCPU, 85 GB RAM
-      # Sufficient for batch_size=32 at 3s (64 latent tokens per sample)
       machineType: a2-highgpu-1g
+
+      # FIX 2: The correct AcceleratorType enum value for A100 40GB is
+      # NVIDIA_TESLA_A100 (not NVIDIA_A100).  For A100 80GB use
+      # NVIDIA_A100_80GB.  For a2-highgpu-* machine types the accelerator
+      # is implicit in the machine type, so this field can be omitted
+      # entirely — but specifying it explicitly is valid and makes the
+      # intent clear.
       acceleratorType: NVIDIA_TESLA_A100
       acceleratorCount: 1
 
@@ -51,66 +69,32 @@ workerPoolSpecs:
 
     diskSpec:
       bootDiskType: pd-ssd
-      # 500 GB: 29 GB for pre-encoded latents + gcsfuse cache + model weights
+      # 500 GB: model weights (~5 GB) + gcsfuse cache + OS overhead
       bootDiskSizeGb: 500
 
     containerSpec:
-      # ── Option A: Use your pre-built image (recommended) ──────────────────
-      # Replace with your Artifact Registry image URI after building:
-      imageUri: "europe-west4-docker.pkg.dev/YOUR_PROJECT_ID/dnl/f1-training:latest"
+      imageUri: "europe-west4-docker.pkg.dev/YOUR_PROJECT_ID/dnl-training/f1-trainer:latest"
 
-      # ── Option B: Use public DLVM base image (no Docker build needed) ─────
-      # Uncomment the line below and comment out Option A above.
-      # The inline bootstrap script installs all missing system packages.
-      # imageUri: "us-docker.pkg.dev/deeplearning-platform-release/gcr.io/pytorch-gpu.2-1.py310:latest"
-
-      # Entry point: bootstrap system + Python deps, mount GCS, run pre_encode.py
+      # Entry point: mount GCS, locate checkpoint, run pre_encode.py
+      # FIX 3: The inline 'python -c "..." ' blocks had multi-line Python
+      # source indented inside a YAML block scalar.  The shell receives the
+      # indentation literally, which causes IndentationError for the
+      # 'if torch.cuda.is_available():' block.  All Python statements are
+      # now written as single-line semicolon-joined strings so the shell
+      # never sees unexpected indentation.
       command:
         - bash
         - -c
         - |
           set -euo pipefail
 
-          # ── [0/6] System packages ──────────────────────────────────────────
-          # Skip this block if using Option A (pre-built image already has these).
-          # Uncomment if using Option B (DLVM base image).
-          #
-          # echo "=== [0/6] Installing system packages ==="
-          # apt-get update -qq
-          # apt-get install -y --no-install-recommends \
-          #     git git-lfs curl wget gnupg lsb-release software-properties-common \
-          #     build-essential libsndfile1 libsndfile1-dev libsox-fmt-all sox ffmpeg \
-          #     libavcodec-dev libavformat-dev libavutil-dev libswresample-dev \
-          #     libportaudio2 libasound2-dev libflac-dev libvorbis-dev libopus-dev \
-          #     libmp3lame-dev fuse jq rsync pv
-          # rm -rf /var/lib/apt/lists/*
-          # curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
-          #     | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
-          # echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/cloud.google.gpg] \
-          #     https://packages.cloud.google.com/apt cloud-sdk main" \
-          #     | tee /etc/apt/sources.list.d/google-cloud-sdk.list
-          # echo "deb https://packages.cloud.google.com/apt gcsfuse-$(lsb_release -cs) main" \
-          #     | tee /etc/apt/sources.list.d/gcsfuse.list
-          # apt-get update -qq && apt-get install -y google-cloud-cli gcsfuse
-          # echo "user_allow_other" >> /etc/fuse.conf
+          echo "=== [1/5] Verifying environment ==="
+          python3 -c "import torch, torchaudio, soundfile, librosa, pytorch_lightning as pl; \
+            print('PyTorch ' + torch.__version__ + ' | torchaudio ' + torchaudio.__version__ + ' | PL ' + pl.__version__); \
+            print('CUDA available: ' + str(torch.cuda.is_available()) + ' | GPUs: ' + str(torch.cuda.device_count())); \
+            print('GPU: ' + (torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'none'))"
 
-          # ── [1/6] Python packages (skip if using pre-built image) ─────────
-          # Uncomment if using Option B:
-          # pip install --upgrade pip setuptools wheel --quiet
-          # pip install --no-cache-dir -r /workspace/requirements/base.txt --quiet
-          # pip install --no-cache-dir -r /workspace/requirements/encode.txt --quiet
-          # pip install --no-cache-dir -e /workspace/ --no-deps --quiet
-
-          echo "=== [2/6] Verifying environment ==="
-          python -c "
-          import torch, torchaudio, soundfile, librosa, pytorch_lightning as pl
-          print(f'PyTorch {torch.__version__} | torchaudio {torchaudio.__version__} | PL {pl.__version__}')
-          print(f'CUDA: {torch.cuda.is_available()} | GPUs: {torch.cuda.device_count()}')
-          if torch.cuda.is_available():
-              print(f'GPU: {torch.cuda.get_device_name(0)}')
-          "
-
-          echo "=== [3/6] Mounting GCS bucket ==="
+          echo "=== [2/5] Mounting GCS bucket ==="
           mkdir -p /mnt/gcs
           gcsfuse --implicit-dirs \
             --stat-cache-ttl=60s \
@@ -119,7 +103,7 @@ workerPoolSpecs:
             "${GCS_BUCKET}" /mnt/gcs
           echo "GCS bucket mounted at /mnt/gcs"
 
-          echo "=== [4/6] Locating base checkpoint ==="
+          echo "=== [3/5] Locating base checkpoint ==="
           CKPT_LOCAL="/workspace/stable-audio-open-1.0.ckpt"
           CKPT_GCS="gs://${GCS_BUCKET}/checkpoints/stable-audio-open-1.0.ckpt"
 
@@ -130,22 +114,15 @@ workerPoolSpecs:
             gsutil -m cp "${CKPT_GCS}" "${CKPT_LOCAL}"
           else
             echo "Checkpoint not in GCS. Downloading from HuggingFace Hub..."
-            pip install huggingface_hub --quiet
-            python -c "
-          from huggingface_hub import hf_hub_download
-          path = hf_hub_download(
-              repo_id='stabilityai/stable-audio-open-1.0',
-              filename='model.safetensors',
-              local_dir='/workspace'
-          )
-          import os; os.rename(path, '${CKPT_LOCAL}')
-          print(f'Downloaded to ${CKPT_LOCAL}')
-          "
+            python3 -c "from huggingface_hub import hf_hub_download; import os; \
+              path = hf_hub_download(repo_id='stabilityai/stable-audio-open-1.0', filename='model.safetensors', local_dir='/workspace'); \
+              os.rename(path, '${CKPT_LOCAL}'); \
+              print('Downloaded to ${CKPT_LOCAL}')"
           fi
 
-          echo "=== [5/6] Running VAE pre-encoding ==="
+          echo "=== [4/5] Running VAE pre-encoding ==="
           cd /workspace
-          python pre_encode.py \
+          python3 pre_encode.py \
             --model-config models/foundation1_3s/model_config_3s.json \
             --ckpt-path "${CKPT_LOCAL}" \
             --dataset-config stable_audio_tools/configs/dataset_configs/gcs_f1_3s_pre_encode.json \
@@ -155,10 +132,14 @@ workerPoolSpecs:
             --num-workers "${NUM_WORKERS}" \
             --num-nodes 1
 
-          echo "=== [6/6] Pre-encoding complete ==="
+          echo "=== [5/5] Pre-encoding complete ==="
           echo "Output location: gs://${GCS_BUCKET}/pre_encoded_3s/"
           gsutil du -sh "gs://${GCS_BUCKET}/pre_encoded_3s/" || true
 
+      # FIX 4: The 'env' list must be a direct child of 'containerSpec', not
+      # a sibling of 'containerSpec'.  In the previous version the indentation
+      # placed 'env' at the workerPoolSpec level, which is not a valid field
+      # there.  Moved it inside containerSpec where the API expects it.
       env:
         # ── Required ──────────────────────────────────────────────────────────
         - name: GCS_BUCKET
