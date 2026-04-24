@@ -95,11 +95,21 @@ workerPoolSpecs:
             print('GPU: ' + (torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'none'))"
 
           echo "=== [2/5] Mounting GCS bucket ==="
-          mkdir -p /mnt/gcs
+          mkdir -p /mnt/gcs /tmp/gcsfuse-cache
+          # gcsfuse 2.0+ replaced CLI flags with a config file.
+          # --file-cache-capacity-mb never existed as a CLI flag (unknown flag error).
+          # --stat-cache-ttl / --type-cache-ttl are deprecated; use metadata-cache.ttl-secs.
+          cat > /tmp/gcsfuse-config.yaml << 'GCSFUSE_CFG'
+          file-cache:
+            max-size-mb: 4096
+            cache-file-for-range-read: true
+          cache-dir: /tmp/gcsfuse-cache
+          metadata-cache:
+            ttl-secs: 60
+            stat-cache-max-size-mb: 32
+          GCSFUSE_CFG
           gcsfuse --implicit-dirs \
-            --stat-cache-ttl=60s \
-            --type-cache-ttl=60s \
-            --file-cache-capacity-mb=4096 \
+            --config-file /tmp/gcsfuse-config.yaml \
             "${GCS_BUCKET}" /mnt/gcs
           echo "GCS bucket mounted at /mnt/gcs"
 

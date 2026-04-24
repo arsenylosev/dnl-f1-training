@@ -155,11 +155,18 @@ mkdir -p "${MOUNT_POINT}"
 if ! mountpoint -q "${MOUNT_POINT}"; then
     echo ""
     echo "=== Step 3: Mounting GCS pre-encoded latents via gcsfuse ==="
+    # gcsfuse 2.0+ uses a config file for cache settings.
+    # --stat-cache-ttl and --type-cache-ttl are deprecated; use metadata-cache.ttl-secs.
+    mkdir -p /tmp/gcsfuse-cache
+    cat > /tmp/gcsfuse-train-config.yaml << 'GCSFUSE_CFG'
+metadata-cache:
+  ttl-secs: 3600
+  stat-cache-max-size-mb: 32
+GCSFUSE_CFG
     gcsfuse \
         --only-dir "pre_encoded_3s" \
         --implicit-dirs \
-        --stat-cache-ttl 1h \
-        --type-cache-ttl 1h \
+        --config-file /tmp/gcsfuse-train-config.yaml \
         "${GCS_BUCKET}" "${MOUNT_POINT}"
     echo "Mounted gs://${GCS_BUCKET}/pre_encoded_3s at ${MOUNT_POINT}"
 else
