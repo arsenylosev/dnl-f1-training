@@ -69,7 +69,7 @@ workerPoolSpecs:
 
     diskSpec:
       bootDiskType: pd-ssd
-      # 500 GB: model weights (~5 GB) + gcsfuse cache + OS overhead
+      # 500 GB: audio input (~50-100 GB) + encoded output (~50 GB) + model weights (~5 GB) + OS overhead
       bootDiskSizeGb: 500
 
     containerSpec:
@@ -94,24 +94,18 @@ workerPoolSpecs:
             print('CUDA available: ' + str(torch.cuda.is_available()) + ' | GPUs: ' + str(torch.cuda.device_count())); \
             print('GPU: ' + (torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'none'))"
 
-          echo "=== [2/5] Mounting GCS bucket ==="
-          mkdir -p /mnt/gcs /tmp/gcsfuse-cache
-          # gcsfuse 2.0+ replaced CLI flags with a config file.
-          # --file-cache-capacity-mb never existed as a CLI flag (unknown flag error).
-          # --stat-cache-ttl / --type-cache-ttl are deprecated; use metadata-cache.ttl-secs.
-          cat > /tmp/gcsfuse-config.yaml << 'GCSFUSE_CFG'
-          file-cache:
-            max-size-mb: 4096
-            cache-file-for-range-read: true
-          cache-dir: /tmp/gcsfuse-cache
-          metadata-cache:
-            ttl-secs: 60
-            stat-cache-max-size-mb: 32
-          GCSFUSE_CFG
-          gcsfuse --implicit-dirs \
-            --config-file /tmp/gcsfuse-config.yaml \
-            "${GCS_BUCKET}" /mnt/gcs
-          echo "GCS bucket mounted at /mnt/gcs"
+          echo "=== [2/5] Syncing input audio from GCS ==="
+          # NOTE: gcsfuse requires /dev/fuse + CAP_SYS_ADMIN, which Vertex AI
+          # unprivileged containers do NOT have (fusermount exits 1 immediately).
+          # We use gsutil -m rsync instead — copies files to local disk once at
+          # startup, then all I/O is local (faster for random-access workloads).
+          mkdir -p /workspace/audio
+          echo "Syncing gs://${GCS_BUCKET}/training_datasets/ → /workspace/audio/ ..."
+          gsutil -m rsync -r \
+            "gs://${GCS_BUCKET}/training_datasets/" \
+            /workspace/audio/
+          echo "Sync complete. Files:"
+          find /workspace/audio -name '*.wav' | wc -l
 
           echo "=== [3/5] Locating base checkpoint ==="
           CKPT_LOCAL="/workspace/stable-audio-open-1.0.ckpt"
@@ -136,15 +130,20 @@ workerPoolSpecs:
             --model-config models/foundation1_3s/model_config_3s.json \
             --ckpt-path "${CKPT_LOCAL}" \
             --dataset-config stable_audio_tools/configs/dataset_configs/gcs_f1_3s_pre_encode.json \
-            --output-path /mnt/gcs/pre_encoded_3s/ \
+            --output-path /workspace/pre_encoded_3s/ \
             --sample-size "${SAMPLE_SIZE}" \
             --batch-size "${BATCH_SIZE}" \
             --num-workers "${NUM_WORKERS}" \
             --num-nodes 1
 
-          echo "=== [5/5] Pre-encoding complete ==="
-          echo "Output location: gs://${GCS_BUCKET}/pre_encoded_3s/"
+          echo "=== [5/5] Uploading encoded latents to GCS ==="
+          echo "Uploading /workspace/pre_encoded_3s/ → gs://${GCS_BUCKET}/pre_encoded_3s/ ..."
+          gsutil -m rsync -r \
+            /workspace/pre_encoded_3s/ \
+            "gs://${GCS_BUCKET}/pre_encoded_3s/"
+          echo "Upload complete."
           gsutil du -sh "gs://${GCS_BUCKET}/pre_encoded_3s/" || true
+          echo "Pre-encoding complete. Output: gs://${GCS_BUCKET}/pre_encoded_3s/"
 
       # FIX 4: The 'env' list must be a direct child of 'containerSpec', not
       # a sibling of 'containerSpec'.  In the previous version the indentation

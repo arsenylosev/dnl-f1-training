@@ -92,33 +92,25 @@ workerPoolSpecs:
           # pip install --no-cache-dir -e /workspace/ --no-deps --quiet
 
           echo "=== [2/7] Verifying environment ==="
-          python -c "
-          import torch, torchaudio, soundfile, pytorch_lightning as pl
-          print(f'PyTorch {torch.__version__} | PL {pl.__version__}')
-          print(f'CUDA: {torch.cuda.is_available()} | GPUs: {torch.cuda.device_count()}')
-          for i in range(torch.cuda.device_count()):
-              props = torch.cuda.get_device_properties(i)
-              print(f'  GPU {i}: {props.name} ({props.total_memory // 1024**3} GB)')
-          "
+          python3 -c "import torch, torchaudio, soundfile, pytorch_lightning as pl; \
+            print('PyTorch ' + torch.__version__ + ' | PL ' + pl.__version__); \
+            print('CUDA: ' + str(torch.cuda.is_available()) + ' | GPUs: ' + str(torch.cuda.device_count())); \
+            [print('  GPU ' + str(i) + ': ' + torch.cuda.get_device_properties(i).name + \
+              ' (' + str(torch.cuda.get_device_properties(i).total_memory // 1024**3) + ' GB)') \
+              for i in range(torch.cuda.device_count())];"
 
-          echo "=== [3/7] Mounting GCS bucket ==="
-          mkdir -p /mnt/gcs /tmp/gcsfuse-cache
-          # gcsfuse 2.0+ replaced CLI flags with a config file.
-          # --file-cache-capacity-mb never existed as a CLI flag (unknown flag error).
-          # --stat-cache-ttl / --type-cache-ttl are deprecated; use metadata-cache.ttl-secs.
-          cat > /tmp/gcsfuse-config.yaml << 'GCSFUSE_CFG'
-          file-cache:
-            max-size-mb: 8192
-            cache-file-for-range-read: true
-          cache-dir: /tmp/gcsfuse-cache
-          metadata-cache:
-            ttl-secs: 60
-            stat-cache-max-size-mb: 32
-          GCSFUSE_CFG
-          gcsfuse --implicit-dirs \
-            --config-file /tmp/gcsfuse-config.yaml \
-            "${GCS_BUCKET}" /mnt/gcs
-          echo "GCS bucket mounted at /mnt/gcs"
+          echo "=== [3/7] Syncing pre-encoded latents from GCS ==="
+          # NOTE: gcsfuse requires /dev/fuse + CAP_SYS_ADMIN, which Vertex AI
+          # unprivileged containers do NOT have (fusermount exits 1 immediately).
+          # We copy the pre-encoded dataset to local SSD once at startup.
+          # The 500 GB boot disk has ample space for the latent files.
+          mkdir -p /workspace/pre_encoded_3s
+          echo "Syncing gs://${GCS_BUCKET}/pre_encoded_3s/ → /workspace/pre_encoded_3s/ ..."
+          gsutil -m rsync -r \
+            "gs://${GCS_BUCKET}/pre_encoded_3s/" \
+            /workspace/pre_encoded_3s/
+          echo "Sync complete. Latent files:"
+          find /workspace/pre_encoded_3s -name '*.npy' | wc -l
 
           echo "=== [4/7] Locating base checkpoint ==="
           CKPT_LOCAL="/workspace/stable-audio-open-1.0.ckpt"
@@ -131,16 +123,11 @@ workerPoolSpecs:
             gsutil -m cp "${CKPT_GCS}" "${CKPT_LOCAL}"
           else
             echo "Checkpoint not in GCS. Downloading from HuggingFace Hub..."
-            python -c "
-          from huggingface_hub import hf_hub_download
-          path = hf_hub_download(
-              repo_id='stabilityai/stable-audio-open-1.0',
-              filename='model.safetensors',
-              local_dir='/workspace'
-          )
-          import os; os.rename(path, '${CKPT_LOCAL}')
-          print(f'Downloaded to ${CKPT_LOCAL}')
-          "
+            python3 -c "from huggingface_hub import hf_hub_download; import os; \
+              path = hf_hub_download(repo_id='stabilityai/stable-audio-open-1.0', \
+                filename='model.safetensors', local_dir='/workspace'); \
+              os.rename(path, '${CKPT_LOCAL}'); \
+              print('Downloaded to ${CKPT_LOCAL}')"
           fi
 
           echo "=== [5/7] Checking for resume checkpoint ==="
@@ -166,7 +153,7 @@ workerPoolSpecs:
             --model-config models/foundation1_3s/model_config_3s.json \
             --pretrained-ckpt-path "${CKPT_LOCAL}" \
             --dataset-config stable_audio_tools/configs/dataset_configs/pre_encoded_f1_3s.json \
-            --save-dir /mnt/gcs/checkpoints/f1_3s/ \
+            --save-dir /workspace/checkpoints/f1_3s/ \
             --name foundation1-3s-finetune \
             --num-nodes 1 \
             --batch-size "${BATCH_SIZE}" \
@@ -178,8 +165,11 @@ workerPoolSpecs:
             --checkpoint-every 10000 \
             ${RESUME_FLAG}
 
-          echo "=== [7/7] Training complete ==="
-          echo "Checkpoints at: gs://${GCS_BUCKET}/checkpoints/f1_3s/"
+          echo "=== [7/7] Uploading checkpoints to GCS ==="
+          gsutil -m rsync -r \
+            /workspace/checkpoints/f1_3s/ \
+            "gs://${GCS_BUCKET}/checkpoints/f1_3s/"
+          echo "Training complete. Checkpoints at: gs://${GCS_BUCKET}/checkpoints/f1_3s/"
 
       env:
         # ── Required ──────────────────────────────────────────────────────────
