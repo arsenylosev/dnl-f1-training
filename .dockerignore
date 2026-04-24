@@ -22,6 +22,7 @@ venv/
 .venv/
 env/
 .env/
+opt/
 
 # Model weights (large binary files — mount from GCS at runtime instead)
 *.ckpt
@@ -29,12 +30,14 @@ env/
 *.pt
 *.pth
 *.bin
-models/*/Foundation_1*
-models/*/stable-audio*
+*.h5
+*.hdf5
+models/
 
 # Pre-encoded latents (large — stored in GCS)
 pre_encoded_3s/
 latents/
+data/
 
 # Logs and checkpoints
 *.log
@@ -42,6 +45,23 @@ logs/
 checkpoints/
 wandb/
 clearml_cache/
+mlruns/
+outputs/
+
+# Jupyter notebooks (not needed in training container)
+*.ipynb
+.ipynb_checkpoints/
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Test artefacts
+.pytest_cache/
+.coverage
+htmlcov/
+*.xml
 
 # IDE and OS files
 .idea/
@@ -55,3 +75,4 @@ Thumbs.db
 tmp/
 temp/
 *.tmp
+scratch/

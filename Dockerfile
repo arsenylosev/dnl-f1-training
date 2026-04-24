@@ -4,17 +4,26 @@
 # Base:  NVIDIA PyTorch 24.01 (CUDA 12.3.2, PyTorch 2.2, Python 3.10, Ubuntu 22.04)
 # Source: https://catalog.ngc.nvidia.com/orgs/nvidia/containers/pytorch
 #
-# This image is used for BOTH pre-encoding (pre_encode.py) and training
-# (train.py). The STEP env var controls which script runs at container start.
+# SIZE OPTIMISATION NOTES
+# -----------------------
+# The NVIDIA base image is ~18 GB uncompressed.  Cloud Shell has a ~50 GB home
+# directory; Docker stores overlay snapshots there, so the total uncompressed
+# image must stay well under ~45 GB to leave room for the export step.
+#
+# Techniques used here:
+#   1. Remove large unused packages from the base image in the very first layer
+#      (apex, transformer-engine, nsight tools, CUDA samples) — saves ~3-4 GB.
+#   2. Merge all pip install steps into ONE RUN command and purge the pip cache
+#      inside the same command — avoids duplicate layer blobs.
+#   3. Merge small housekeeping RUN steps (fuse.conf, chmod, git-lfs) into
+#      adjacent layers to reduce total snapshot count.
+#   4. Use --no-cache-dir on every pip call and clean apt lists after every
+#      apt-get block.
 #
 # Build & push (Artifact Registry — recommended):
 #   gcloud auth configure-docker europe-west4-docker.pkg.dev
 #   docker build -t europe-west4-docker.pkg.dev/YOUR_PROJECT/dnl/f1-training:latest .
 #   docker push europe-west4-docker.pkg.dev/YOUR_PROJECT/dnl/f1-training:latest
-#
-# Build & push (Container Registry — legacy):
-#   docker build -t gcr.io/YOUR_PROJECT_ID/dnl-f1-training:latest .
-#   docker push gcr.io/YOUR_PROJECT_ID/dnl-f1-training:latest
 #
 # Run locally (with GPU):
 #   docker run --gpus all --rm -it \
@@ -33,76 +42,85 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /workspace
 
 # ---------------------------------------------------------------------------
-# 1. System packages
+# 0. Strip large unused packages from the base image  (~3-4 GB saved)
 # ---------------------------------------------------------------------------
-# NOTE: The NVIDIA PyTorch base image ships Ubuntu 22.04 with a minimal set
-# of packages. git, curl, and many audio libs are NOT pre-installed.
-# This block installs everything needed by the full pipeline.
-RUN apt-get update -qq && apt-get install -y --no-install-recommends \
-    # Core utilities (NOT pre-installed on the base image)
-    git \
-    git-lfs \
-    curl \
-    wget \
-    unzip \
-    zip \
-    ca-certificates \
-    gnupg \
-    lsb-release \
-    software-properties-common \
-    build-essential \
-    pkg-config \
-    cmake \
-    ninja-build \
-    # Python build dependencies
-    libssl-dev \
-    libffi-dev \
-    zlib1g-dev \
-    libbz2-dev \
-    # Audio system libraries
-    # Required by: soundfile, librosa, pydub, pedalboard, torchaudio
-    libsndfile1 \
-    libsndfile1-dev \
-    libsox-fmt-all \
-    sox \
-    ffmpeg \
-    libavcodec-dev \
-    libavformat-dev \
-    libavutil-dev \
-    libswresample-dev \
-    libswscale-dev \
-    libportaudio2 \
-    portaudio19-dev \
-    libasound2-dev \
-    libflac-dev \
-    libvorbis-dev \
-    libopus-dev \
-    libmp3lame-dev \
-    libmpg123-dev \
-    # FUSE (required by gcsfuse)
-    fuse \
-    # Useful utilities
-    htop \
-    tmux \
-    vim \
-    jq \
-    rsync \
-    pv \
-    && rm -rf /var/lib/apt/lists/*
+# The NVIDIA base image bundles several packages that this pipeline does not
+# use: apex (custom CUDA kernels for NLP), transformer-engine (FP8 training),
+# nsight-systems / nsight-compute (profiling GUIs), and the full CUDA samples.
+# Removing them in the very first layer keeps the overlay diff small.
+RUN pip uninstall -y \
+        apex \
+        transformer-engine \
+        pynvml \
+    2>/dev/null || true \
+    && pip cache purge \
+    && apt-get purge -y --auto-remove \
+        nsight-systems-* \
+        nsight-compute-* \
+        cuda-samples-* \
+    2>/dev/null || true \
+    && rm -rf \
+        /usr/local/cuda/samples \
+        /usr/local/cuda/extras \
+        /var/lib/apt/lists/*
 
-# Allow non-root users to mount FUSE filesystems
-RUN echo "user_allow_other" >> /etc/fuse.conf
+# ---------------------------------------------------------------------------
+# 1. System packages + FUSE config
+# ---------------------------------------------------------------------------
+RUN apt-get update -qq \
+    && apt-get install -y --no-install-recommends \
+        git \
+        git-lfs \
+        curl \
+        wget \
+        unzip \
+        zip \
+        ca-certificates \
+        gnupg \
+        lsb-release \
+        software-properties-common \
+        build-essential \
+        pkg-config \
+        cmake \
+        ninja-build \
+        libssl-dev \
+        libffi-dev \
+        zlib1g-dev \
+        libbz2-dev \
+        libsndfile1 \
+        libsndfile1-dev \
+        libsox-fmt-all \
+        sox \
+        ffmpeg \
+        libavcodec-dev \
+        libavformat-dev \
+        libavutil-dev \
+        libswresample-dev \
+        libswscale-dev \
+        libportaudio2 \
+        portaudio19-dev \
+        libasound2-dev \
+        libflac-dev \
+        libvorbis-dev \
+        libopus-dev \
+        libmp3lame-dev \
+        libmpg123-dev \
+        fuse \
+        htop \
+        tmux \
+        vim \
+        jq \
+        rsync \
+        pv \
+    && echo "user_allow_other" >> /etc/fuse.conf \
+    && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------
 # 2. Google Cloud SDK (gcloud, gsutil) + gcsfuse
 # ---------------------------------------------------------------------------
 # Key format note (2024+):
-#   The Google Cloud apt repos require the key saved as a plain ASCII-armored
-#   .asc file (via 'tee'), NOT a dearmored .gpg binary.  Both the Cloud SDK
-#   and gcsfuse source lines must reference it with 'signed-by='.  Using
-#   'gpg --dearmor' and omitting 'signed-by=' from the gcsfuse line causes:
-#     W: GPG error: ... NO_PUBKEY C0BA5CE6DC6315A3
-#     E: The repository ... is not signed.
+#   Both the Cloud SDK and gcsfuse source lines must use 'signed-by=' pointing
+#   to a plain ASCII-armored .asc key file (not a dearmored .gpg binary).
 RUN curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
       | tee /usr/share/keyrings/cloud.google.asc > /dev/null \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/cloud.google.asc] \
@@ -118,67 +136,62 @@ RUN curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
     && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------
-# 3. Python packages
+# 3. Python packages  (single RUN layer — pip cache purged at the end)
 # ---------------------------------------------------------------------------
-# The base image already provides: torch 2.2, torchaudio 2.2, CUDA 12.3 toolkit.
-# We upgrade pip and install in dependency order using the requirements/ files.
+# All pip installs are merged into one RUN command so Docker creates only one
+# overlay diff instead of four.  The pip cache is purged inside the same
+# command so it is never committed to any layer.
+#
+# Install order:
+#   a) pip/setuptools/wheel upgrade
+#   b) GCS + experiment tracking (light deps, install first)
+#   c) requirements/base.txt  (audio libs, transformers, diffusion utils)
+#   d) requirements/encode.txt (pytorch-lightning, torchmetrics)
+#   e) requirements/train.txt  (deepspeed, bitsandbytes)
+#   f) torchvision upgrade — the base image ships torchvision 0.17 built for
+#      torch 2.2; after our installs upgrade torch to 2.11 the old torchvision
+#      crashes with "operator torchvision::nms does not exist".  Upgrading it
+#      here (in the same layer) avoids an extra snapshot.
 
-RUN pip install --upgrade pip setuptools wheel
-
-# GCS + experiment tracking (no heavy transitive deps — install first)
-RUN pip install --no-cache-dir \
-    "google-cloud-storage>=2.14.0,<3.0" \
-    "clearml>=1.14.0" \
-    "wandb>=0.15.4,<0.16.0" \
-    "huggingface_hub>=0.20.0" \
-    "safetensors>=0.4.0"
-
-# Copy requirements files before the full repo (better Docker layer caching)
 COPY requirements/ /workspace/requirements/
 
-# Install base + encode + train requirements
-# base.txt: shared deps (transformers, librosa, auraloss, etc.)
-# encode.txt: pytorch-lightning, torchmetrics
-# train.txt: deepspeed, bitsandbytes, pytorch-lightning
-RUN pip install --no-cache-dir -r /workspace/requirements/base.txt \
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
+    \
+    && pip install --no-cache-dir \
+        "google-cloud-storage>=2.14.0,<3.0" \
+        "clearml>=1.14.0" \
+        "wandb>=0.15.4,<0.16.0" \
+        "huggingface_hub>=0.20.0" \
+        "safetensors>=0.4.0" \
+    \
+    && pip install --no-cache-dir -r /workspace/requirements/base.txt \
     && pip install --no-cache-dir -r /workspace/requirements/encode.txt \
-    && pip install --no-cache-dir -r /workspace/requirements/train.txt
+    && pip install --no-cache-dir -r /workspace/requirements/train.txt \
+    \
+    && pip install --no-cache-dir --upgrade \
+        torchvision \
+        --extra-index-url https://download.pytorch.org/whl/cu121 \
+    \
+    && pip cache purge \
+    && find /usr/local/lib/python3.10 -name '*.pyc' -delete \
+    && find /usr/local/lib/python3.10 -name '__pycache__' -type d -empty -delete
 
 # ---------------------------------------------------------------------------
 # 4. Copy repository and install in editable mode
 # ---------------------------------------------------------------------------
 COPY . /workspace/
 
-# Install the package itself without reinstalling already-present deps
 RUN pip install --no-cache-dir -e /workspace/ --no-deps \
-    || echo "WARNING: editable install failed, continuing (deps already installed above)"
-
-# Make all scripts executable
-RUN chmod +x /workspace/scripts/*.sh
-
-# git-lfs init
-RUN git lfs install --system 2>/dev/null || git lfs install
+        || echo "WARNING: editable install failed, continuing (deps already installed above)" \
+    && pip cache purge \
+    && chmod +x /workspace/scripts/*.sh \
+    && git lfs install --system 2>/dev/null || git lfs install
 
 # ---------------------------------------------------------------------------
-# 5. Align torchvision with the installed torch version
-# ---------------------------------------------------------------------------
-# The NVIDIA base image ships torchvision built against its bundled torch 2.2.
-# After upgrading torch (via requirements/), the old torchvision crashes on
-# import with:
-#   RuntimeError: operator torchvision::nms does not exist
-# because its compiled C++ extension references ops that no longer exist in
-# the new torch dispatcher. Upgrading torchvision here ensures it is rebuilt
-# against the current torch ABI. The --extra-index-url is needed so pip can
-# find CUDA-enabled torchvision wheels from the PyTorch index.
-RUN pip install --no-cache-dir --upgrade \
-    torchvision \
-    --extra-index-url https://download.pytorch.org/whl/cu121
-
-# ---------------------------------------------------------------------------
-# 6. Verify installation
+# 5. Verify installation
 # ---------------------------------------------------------------------------
 # NOTE: Use a heredoc (<<'EOF') so that the Python source lines are NOT
-# parsed by Docker as Dockerfile instructions. A plain RUN python -c "..."
+# parsed by Docker as Dockerfile instructions.  A plain RUN python -c "..."
 # with indented continuation lines causes Docker to misparse the indented
 # 'import' keyword as an unknown instruction.
 RUN python3 << 'EOF'
@@ -194,7 +207,7 @@ import clearml; print(f'clearml: {clearml.__version__}')
 EOF
 
 # ---------------------------------------------------------------------------
-# 7. Entry point
+# 6. Entry point
 # ---------------------------------------------------------------------------
 # STEP env var controls which pipeline stage runs:
 #   STEP=train   → runs train.py via gcp_train_f1_3s.sh (default)
