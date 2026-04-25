@@ -92,8 +92,12 @@ workerPoolSpecs:
           # pip install --no-cache-dir -e /workspace/ --no-deps --quiet
 
           echo "=== [2/7] Verifying environment ==="
+          # Ensure stable_audio_tools submodules are resolvable (idempotent, <5 s).
+          pip install -e /workspace/ --no-deps -q
           python3 -c "import torch, torchaudio, soundfile, pytorch_lightning as pl; \
+            import stable_audio_tools; \
             print('PyTorch ' + torch.__version__ + ' | PL ' + pl.__version__); \
+            print('stable_audio_tools: OK'); \
             print('CUDA: ' + str(torch.cuda.is_available()) + ' | GPUs: ' + str(torch.cuda.device_count())); \
             [print('  GPU ' + str(i) + ': ' + torch.cuda.get_device_properties(i).name + \
               ' (' + str(torch.cuda.get_device_properties(i).total_memory // 1024**3) + ' GB)') \
@@ -185,6 +189,15 @@ workerPoolSpecs:
           value: "8"                             # 52 vCPUs available; leave headroom
         - name: PRECISION
           value: "16-mixed"                      # bf16-mixed also supported on H100
+
+        # ── HuggingFace (required only if checkpoint is NOT already in GCS) ─────
+        # stable-audio-open-1.0 is a gated model. To use the HF fallback:
+        #   1. Accept license: https://huggingface.co/stabilityai/stable-audio-open-1.0
+        #   2. Create read token: https://huggingface.co/settings/tokens
+        #   3. Set the value below.
+        # Leave empty ("") if the checkpoint is already in GCS (recommended).
+        - name: HUGGINGFACE_TOKEN
+          value: ""                               # YOUR_HF_READ_TOKEN or leave empty
 
         # ── ClearML experiment tracking (optional) ────────────────────────────
         - name: CLEARML_API_HOST

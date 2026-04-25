@@ -89,11 +89,17 @@ workerPoolSpecs:
           set -euo pipefail
 
           echo "=== [1/5] Verifying environment ==="
+          # Ensure stable_audio_tools submodules are resolvable.
+          # The Dockerfile runs 'pip install -e /workspace/' at build time, but
+          # editable-install .pth files can be lost if the image layer is
+          # partially overwritten. Re-running is idempotent and takes <5 s.
+          pip install -e /workspace/ --no-deps -q
           python3 -c "import torch, torchaudio, soundfile, librosa, pytorch_lightning as pl; \
+            import stable_audio_tools; \
             print('PyTorch ' + torch.__version__ + ' | torchaudio ' + torchaudio.__version__ + ' | PL ' + pl.__version__); \
+            print('stable_audio_tools: OK'); \
             print('CUDA available: ' + str(torch.cuda.is_available()) + ' | GPUs: ' + str(torch.cuda.device_count())); \
             print('GPU: ' + (torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'none'))"
-
           echo "=== [2/5] Syncing input audio from GCS ==="
           # NOTE: gcsfuse requires /dev/fuse + CAP_SYS_ADMIN, which Vertex AI
           # unprivileged containers do NOT have (fusermount exits 1 immediately).
