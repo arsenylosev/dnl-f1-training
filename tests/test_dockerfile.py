@@ -43,8 +43,12 @@ class TestShadowCleanup:
     """Ensure the source stable_audio_tools/ dir is removed after install."""
 
     def test_rm_rf_stable_audio_tools_present(self):
-        assert "rm -rf /workspace/stable_audio_tools/" in DOCKERFILE, (
-            "Missing 'rm -rf /workspace/stable_audio_tools/' — the source "
+        # Accept both trailing-slash and no-trailing-slash variants
+        assert (
+            "rm -rf /workspace/stable_audio_tools/" in DOCKERFILE
+            or "rm -rf /workspace/stable_audio_tools" in DOCKERFILE
+        ), (
+            "Missing 'rm -rf /workspace/stable_audio_tools' — the source "
             "directory will shadow the site-packages install"
         )
 

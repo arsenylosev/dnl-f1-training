@@ -191,28 +191,42 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
     && find /usr/local/lib/python3.10 -name '__pycache__' -type d -empty -delete
 
 # ---------------------------------------------------------------------------
-# 4. Copy repository and install as a regular (non-editable) package
+# 4. Copy repository — install stable_audio_tools via direct cp
 # ---------------------------------------------------------------------------
-# IMPORTANT — Python path shadowing:
-#   WORKDIR is /workspace, so Python's CWD is /workspace/.  When Python
-#   resolves 'import stable_audio_tools', it checks the CWD *before*
-#   site-packages.  If /workspace/stable_audio_tools/ exists as a plain
-#   directory, Python finds it first and treats it as a namespace package
-#   (no proper __init__ metadata), causing:
-#     ModuleNotFoundError: No module named 'stable_audio_tools.models.factory'
+# We deliberately bypass 'pip install' for stable_audio_tools to avoid all
+# setuptools/pyproject.toml complexity.  History of failed approaches:
 #
-# Fix:
-#   1. pip install --no-deps /workspace/  → copies files into site-packages/
-#   2. rm -rf /workspace/stable_audio_tools/  → removes the shadow directory
-#   3. rm -rf /workspace/setup.py /workspace/pyproject.toml  → cleanup
-#   Now Python only finds the properly-installed copy in site-packages/.
+#   pip install -e (editable)  → .pth file lost on Vertex AI layer remount
+#   pip install --no-deps .    → pyproject.toml missing [project] section
+#                                 causes setuptools>=61 to fail silently
+#   pyproject.toml fix         → Cloud Build cache serves old COPY layer,
+#                                 pyproject.toml change never applied to build
+#
+# Solution: cp the package directory directly into site-packages.
+# This is equivalent to what pip would do after building the wheel, but skips
+# the wheel-build step entirely.  It is immune to setuptools version
+# differences, pyproject.toml parsing, and Docker layer caching.
+#
+# IMPORTANT — Python path shadowing:
+#   WORKDIR is /workspace, so Python's CWD is /workspace/.  We MUST remove
+#   /workspace/stable_audio_tools/ after copying to site-packages, otherwise
+#   Python finds the raw source directory first (before site-packages) and
+#   treats it as a namespace package, causing ModuleNotFoundError on submodules.
 COPY . /workspace/
 
-RUN pip install --no-cache-dir --no-deps /workspace/ \
-    && rm -rf /workspace/stable_audio_tools/ \
-              /workspace/setup.py \
-              /workspace/pyproject.toml \
-              /workspace/stable_audio_tools.egg-info/ \
+RUN SITE_PKGS=$(python3 -c "import site; print(site.getsitepackages()[0])") \
+    # Copy the full package tree (all subpackages) into site-packages
+    && cp -r /workspace/stable_audio_tools "${SITE_PKGS}/stable_audio_tools" \
+    # Write a minimal dist-info so pip list / importlib can find the package
+    && mkdir -p "${SITE_PKGS}/stable_audio_tools-0.0.16.dist-info" \
+    && printf 'Metadata-Version: 2.1\nName: stable-audio-tools\nVersion: 0.0.16\n' \
+       > "${SITE_PKGS}/stable_audio_tools-0.0.16.dist-info/METADATA" \
+    && printf 'stable_audio_tools\n' \
+       > "${SITE_PKGS}/stable_audio_tools-0.0.16.dist-info/top_level.txt" \
+    # Verify the install is complete before removing the source shadow
+    && python3 -c "from stable_audio_tools.models.factory import create_model_from_config; print('stable_audio_tools install: OK')" \
+    # Remove the source directory so it cannot shadow the installed copy
+    && rm -rf /workspace/stable_audio_tools \
     && chmod +x /workspace/scripts/*.sh \
     && git lfs install --system 2>/dev/null || git lfs install
 
