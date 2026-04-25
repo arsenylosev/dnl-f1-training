@@ -193,23 +193,26 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
 # ---------------------------------------------------------------------------
 # 4. Copy repository and install as a regular (non-editable) package
 # ---------------------------------------------------------------------------
-# WHY NOT editable (-e):
-#   pip install -e creates a .pth pointer file in site-packages that tells
-#   Python "look in /workspace/ for this package".  This is fragile in
-#   containers: if the .pth file is not found at runtime (e.g. layer
-#   re-mounting during Vertex AI job startup), Python falls back to a bare
-#   directory scan and finds stable_audio_tools/ as a namespace package —
-#   but without the editable-install metadata, submodule imports fail with
-#   ModuleNotFoundError: No module named 'stable_audio_tools.models.factory'.
+# IMPORTANT — Python path shadowing:
+#   WORKDIR is /workspace, so Python's CWD is /workspace/.  When Python
+#   resolves 'import stable_audio_tools', it checks the CWD *before*
+#   site-packages.  If /workspace/stable_audio_tools/ exists as a plain
+#   directory, Python finds it first and treats it as a namespace package
+#   (no proper __init__ metadata), causing:
+#     ModuleNotFoundError: No module named 'stable_audio_tools.models.factory'
 #
-# WHY regular install works:
-#   pip install --no-deps (non-editable) copies the package files directly
-#   into site-packages/, baking them into the image layer permanently.
-#   There is no .pth dependency; Python finds the package the same way it
-#   finds any other installed package.
+# Fix:
+#   1. pip install --no-deps /workspace/  → copies files into site-packages/
+#   2. rm -rf /workspace/stable_audio_tools/  → removes the shadow directory
+#   3. rm -rf /workspace/setup.py /workspace/pyproject.toml  → cleanup
+#   Now Python only finds the properly-installed copy in site-packages/.
 COPY . /workspace/
 
 RUN pip install --no-cache-dir --no-deps /workspace/ \
+    && rm -rf /workspace/stable_audio_tools/ \
+              /workspace/setup.py \
+              /workspace/pyproject.toml \
+              /workspace/stable_audio_tools.egg-info/ \
     && chmod +x /workspace/scripts/*.sh \
     && git lfs install --system 2>/dev/null || git lfs install
 

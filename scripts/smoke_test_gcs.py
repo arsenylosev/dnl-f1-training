@@ -51,10 +51,12 @@ from typing import Optional
 # ---------------------------------------------------------------------------
 try:
     from google.cloud import storage as gcs
-except ImportError:
+except Exception as _e:
     print(
-        "ERROR: google-cloud-storage is not installed.\n"
-        "       Run: pip install google-cloud-storage",
+        "ERROR: google-cloud-storage is not installed or failed to import.\n"
+        "       Run: pip install google-cloud-storage\n"
+        f"       Exception type : {type(_e).__name__}\n"
+        f"       Underlying error: {_e}",
         file=sys.stderr,
     )
     sys.exit(1)
