@@ -1,7 +1,37 @@
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
+# ---------------------------------------------------------------------------
+# Project metadata (mirrors setup.py — required by setuptools>=61 validator)
+# ---------------------------------------------------------------------------
+[project]
+name = "stable-audio-tools"
+version = "0.0.16"
+description = "Training and inference tools for generative audio models from Stability AI"
+requires-python = ">=3.8"
+# install_requires is intentionally left here as empty — the full dependency
+# list lives in setup.py to avoid duplication.  pip reads setup.py for deps
+# when [project.dependencies] is absent.
+dynamic = ["dependencies"]
+
+# ---------------------------------------------------------------------------
+# Package discovery
+# ---------------------------------------------------------------------------
+# Without this section, pyproject.toml-based builds only include the root
+# package and miss all subpackages (models/, data/, training/, etc.).
+# setup.py uses find_packages() but pyproject.toml takes precedence when both
+# are present, so we must declare discovery here explicitly.
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["stable_audio_tools*"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = []}
+
+# ---------------------------------------------------------------------------
+# Pytest configuration
+# ---------------------------------------------------------------------------
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --tb=short"
