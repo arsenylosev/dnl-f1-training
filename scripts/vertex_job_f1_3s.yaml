@@ -92,8 +92,8 @@ workerPoolSpecs:
           # pip install --no-cache-dir -e /workspace/ --no-deps --quiet
 
           echo "=== [2/7] Verifying environment ==="
-          # Ensure stable_audio_tools submodules are resolvable (idempotent, <5 s).
-          pip install -e /workspace/ --no-deps -q
+          # Ensure stable_audio_tools is registered in site-packages (idempotent, <5 s).
+          pip install --no-cache-dir --no-deps /workspace/ -q
           python3 -c "import torch, torchaudio, soundfile, pytorch_lightning as pl; \
             import stable_audio_tools; \
             print('PyTorch ' + torch.__version__ + ' | PL ' + pl.__version__); \

@@ -191,12 +191,25 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
     && find /usr/local/lib/python3.10 -name '__pycache__' -type d -empty -delete
 
 # ---------------------------------------------------------------------------
-# 4. Copy repository and install in editable mode
+# 4. Copy repository and install as a regular (non-editable) package
 # ---------------------------------------------------------------------------
+# WHY NOT editable (-e):
+#   pip install -e creates a .pth pointer file in site-packages that tells
+#   Python "look in /workspace/ for this package".  This is fragile in
+#   containers: if the .pth file is not found at runtime (e.g. layer
+#   re-mounting during Vertex AI job startup), Python falls back to a bare
+#   directory scan and finds stable_audio_tools/ as a namespace package —
+#   but without the editable-install metadata, submodule imports fail with
+#   ModuleNotFoundError: No module named 'stable_audio_tools.models.factory'.
+#
+# WHY regular install works:
+#   pip install --no-deps (non-editable) copies the package files directly
+#   into site-packages/, baking them into the image layer permanently.
+#   There is no .pth dependency; Python finds the package the same way it
+#   finds any other installed package.
 COPY . /workspace/
 
-RUN pip install --no-cache-dir -e /workspace/ --no-deps \
-        || echo "WARNING: editable install failed, continuing (deps already installed above)" \
+RUN pip install --no-cache-dir --no-deps /workspace/ \
     && chmod +x /workspace/scripts/*.sh \
     && git lfs install --system 2>/dev/null || git lfs install
 
@@ -217,7 +230,8 @@ import google.cloud.storage; print('google-cloud-storage: OK'); \
 import soundfile; print('soundfile: OK'); \
 import librosa; print('librosa: OK'); \
 import pytorch_lightning as pl; print('pytorch-lightning: ' + pl.__version__); \
-import clearml; print('clearml: ' + clearml.__version__) \
+import clearml; print('clearml: ' + clearml.__version__); \
+import stable_audio_tools; print('stable_audio_tools: OK') \
 "
 
 # ---------------------------------------------------------------------------

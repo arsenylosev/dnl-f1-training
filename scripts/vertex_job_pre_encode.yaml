@@ -89,11 +89,11 @@ workerPoolSpecs:
           set -euo pipefail
 
           echo "=== [1/5] Verifying environment ==="
-          # Ensure stable_audio_tools submodules are resolvable.
-          # The Dockerfile runs 'pip install -e /workspace/' at build time, but
-          # editable-install .pth files can be lost if the image layer is
-          # partially overwritten. Re-running is idempotent and takes <5 s.
-          pip install -e /workspace/ --no-deps -q
+          # Ensure stable_audio_tools is registered in site-packages.
+          # Dockerfile now uses regular (non-editable) install — files are copied
+          # directly into site-packages/ (no .pth pointer). Re-running is
+          # idempotent and takes <5 s.
+          pip install --no-cache-dir --no-deps /workspace/ -q
           python3 -c "import torch, torchaudio, soundfile, librosa, pytorch_lightning as pl; \
             import stable_audio_tools; \
             print('PyTorch ' + torch.__version__ + ' | torchaudio ' + torchaudio.__version__ + ' | PL ' + pl.__version__); \
