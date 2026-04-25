@@ -1,0 +1,109 @@
+# =============================================================================
+# CI — DNL F1 Training Pipeline
+# =============================================================================
+# Runs on every push and pull request to main.
+#
+# Jobs:
+#   1. lint-and-test: Fast structural/syntax checks (< 1 min)
+#      - Dockerfile structure (no heredocs, no editable installs, shadow cleanup)
+#      - Requirements consistency (correct package names, version pins)
+#      - YAML config validation (env placement, no gcsfuse, HF token)
+#      - Shell script syntax (bash -n)
+#      - Python script syntax (ast.parse)
+#
+#   2. docker-build: Full Docker image build (30-40 min, only on main push)
+#      - Builds the image and runs the sanity check
+#      - Only triggered on pushes to main (not PRs) to save CI minutes
+#
+# To run tests locally:
+#   pip install pytest pyyaml
+#   pytest tests/ -v
+#
+# To run Docker build test locally:
+#   pytest tests/test_docker_build.py --run-docker -v
+# =============================================================================
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ─── Job 1: Fast structural checks ─────────────────────────────────────
+  lint-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: pip install pytest pyyaml
+
+      - name: Run structural tests
+        run: |
+          pytest tests/ \
+            --ignore=tests/test_docker_build.py \
+            -v \
+            --tb=short \
+            --no-header
+
+  # ─── Job 2: Docker build (main branch only) ────────────────────────────
+  docker-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: lint-and-test
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Free up disk space
+        run: |
+          # GitHub Actions runners have ~14 GB free; NVIDIA base image is ~18 GB
+          # Remove pre-installed tools to make room
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache
+          df -h /
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t dnl-f1-training:ci-test \
+            --progress=plain \
+            .
+
+      - name: Verify stable_audio_tools import
+        run: |
+          docker run --rm dnl-f1-training:ci-test \
+            python3 -c "
+          from stable_audio_tools.models.factory import create_model_from_config;
+          print('stable_audio_tools.models.factory: OK')
+          "
+
+      - name: Verify all critical imports
+        run: |
+          docker run --rm dnl-f1-training:ci-test \
+            python3 -c "
+          import torch; print('torch:', torch.__version__);
+          import torchaudio; print('torchaudio:', torchaudio.__version__);
+          import pytorch_lightning as pl; print('pl:', pl.__version__);
+          import clearml; print('clearml:', clearml.__version__);
+          import stable_audio_tools; print('stable_audio_tools: OK');
+          print('All imports passed')
+          "
