@@ -223,10 +223,10 @@ RUN SITE_PKGS=$(python3 -c "import site; print(site.getsitepackages()[0])") \
        > "${SITE_PKGS}/stable_audio_tools-0.0.16.dist-info/METADATA" \
     && printf 'stable_audio_tools\n' \
        > "${SITE_PKGS}/stable_audio_tools-0.0.16.dist-info/top_level.txt" \
-    # Verify the install is complete before removing the source shadow
-    && python3 -c "from stable_audio_tools.models.factory import create_model_from_config; print('stable_audio_tools install: OK')" \
-    # Remove the source directory so it cannot shadow the installed copy
+    # Remove the source shadow FIRST so Python cannot find it during verification
     && rm -rf /workspace/stable_audio_tools \
+    # Now verify — with the shadow gone, Python resolves from site-packages only
+    && python3 -c "from stable_audio_tools.models.factory import create_model_from_config, create_model_from_config_path; print('stable_audio_tools.models.factory: OK')" \
     && chmod +x /workspace/scripts/*.sh \
     && git lfs install --system 2>/dev/null || git lfs install
 
