@@ -207,6 +207,11 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
 # the wheel-build step entirely.  It is immune to setuptools version
 # differences, pyproject.toml parsing, and Docker layer caching.
 #
+# Always rm the destination first: if site-packages/stable_audio_tools already
+# exists (e.g. from the NGC image or a transitive pip install), plain
+# `cp -r src dest` nests into dest/stable_audio_tools/ and Python keeps loading
+# the old top-level package — ModuleNotFoundError for models.factory.
+#
 # IMPORTANT — Python path shadowing:
 #   WORKDIR is /workspace, so Python's CWD is /workspace/.  We MUST remove
 #   /workspace/stable_audio_tools/ after copying to site-packages, otherwise
@@ -215,8 +220,12 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
 COPY . /workspace/
 
 RUN SITE_PKGS=$(python3 -c "import site; print(site.getsitepackages()[0])") \
+    # Ensure we replace any pre-existing site-packages copy (avoids cp nesting)
+    && rm -rf "${SITE_PKGS}/stable_audio_tools" \
+    && test -f /workspace/stable_audio_tools/models/factory.py || \
+         (echo "FATAL: build context missing stable_audio_tools/models/ — check .dockerignore and gcloud upload" >&2; exit 1) \
     # Copy the full package tree (all subpackages) into site-packages
-    && cp -r /workspace/stable_audio_tools "${SITE_PKGS}/stable_audio_tools" \
+    && cp -a /workspace/stable_audio_tools "${SITE_PKGS}/stable_audio_tools" \
     # Write a minimal dist-info so pip list / importlib can find the package
     && mkdir -p "${SITE_PKGS}/stable_audio_tools-0.0.16.dist-info" \
     && printf 'Metadata-Version: 2.1\nName: stable-audio-tools\nVersion: 0.0.16\n' \

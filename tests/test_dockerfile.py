@@ -74,6 +74,12 @@ class TestShadowCleanup:
             "directory will shadow the site-packages install"
         )
 
+    def test_remove_site_pkgs_copy_before_install(self):
+        """Pre-existing site-packages/stable_audio_tools makes cp -r nest the tree."""
+        assert "rm -rf" in DOCKERFILE and "SITE_PKGS" in DOCKERFILE
+        assert "${SITE_PKGS}/stable_audio_tools" in DOCKERFILE
+        assert "stable_audio_tools/models/factory.py" in DOCKERFILE
+
     def test_no_editable_install(self):
         """Editable installs create .pth files that break in containers."""
         code_lines = [l for l in DOCKERFILE_LINES if not l.strip().startswith("#")]
