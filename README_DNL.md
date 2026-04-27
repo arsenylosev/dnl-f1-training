@@ -87,9 +87,11 @@ cd dnl-f1-training
 ### 2. Install dependencies
 
 ```bash
-pip install -e .
-pip install google-cloud-storage  # Required for the 'gcs' dataset type
+pip install .
+pip install google-cloud-storage  # required for the 'gcs' dataset type
 ```
+
+For a minimal smoke test of GCS connectivity, see `scripts/setup_python_env.sh` (`--step smoke`). The Vertex training image does not use editable installs.
 
 ### 3. Authenticate with Google Cloud
 
@@ -116,45 +118,33 @@ hf_hub_download(
 
 ## Training Pipeline
 
-### Step 1 — Pre-encode latents (run once)
+Production work for this project runs on **Vertex AI** (pre-encoding, then training). The steps below are ordered for that path.
 
-Pre-encoding runs the frozen OOBLECK VAE over the entire dataset and saves `.npy` latent tensors. This removes the VAE from the training loop, saving ~20 GB VRAM and making each training step ~4× faster.
+### Step 1 — Pre-encode latents on Vertex (run once)
 
-```bash
-# Replace YOUR_GCS_BUCKET_NAME in the dataset config first
-sed -i 's/YOUR_GCS_BUCKET_NAME/my-actual-bucket/g' \
-    stable_audio_tools/configs/dataset_configs/gcs_f1_3s_pre_encode.json
+For production, **pre-encoding is done only on Google Cloud** via the custom job in `scripts/vertex_job_pre_encode.yaml`. The container runs the same `pre_encode.py` as the repo, streams inputs from GCS, and writes `gs://$BUCKET/pre_encoded_3s/`.
 
-python3 pre_encode.py \
-    --model-config models/foundation1_3s/model_config_3s.json \
-    --ckpt-path models/foundation1_3s/Foundation_1.safetensors \
-    --model-half \
-    --dataset-config stable_audio_tools/configs/dataset_configs/gcs_f1_3s_pre_encode.json \
-    --output-path /tmp/pre_encoded_3s \
-    --sample-size 132300 \
-    --batch-size 32 \
-    --num-workers 8
-```
+1. **Build the training image** (name `f1-trainer` in Artifact Registry):
 
-Upload the pre-encoded latents to GCS:
-```bash
-gsutil -m rsync -r /tmp/pre_encoded_3s gs://YOUR_BUCKET/pre_encoded_3s/
-```
+   ```bash
+   gcloud builds submit \
+     --tag europe-west4-docker.pkg.dev/winter-quanta-457022-s0/dnl-training/f1-trainer:latest \
+     --machine-type e2-highcpu-32 --timeout 3600 --async .
+   ```
 
-### Step 2 — Mount pre-encoded latents (gcsfuse)
+2. **Configure dataset + job env** — In `stable_audio_tools/configs/dataset_configs/gcs_f1_3s_pre_encode.json`, set `bucket` to your GCS bucket and correct `train`/`valid` prefixes. In the YAML, set `GCS_BUCKET` and, if needed, **inject secrets (e.g. `HUGGINGFACE_TOKEN`, ClearML) at submit time** via a private config copy or by patching the `env` block before `gcloud ai custom-jobs create` (do not commit tokens).
 
-```bash
-mkdir -p /mnt/gcs/pre_encoded_3s
-gcsfuse \
-    --only-dir pre_encoded_3s \
-    --implicit-dirs \
-    --stat-cache-ttl 1h \
-    YOUR_BUCKET /mnt/gcs/pre_encoded_3s
-```
+3. **Submit the pre-encode job** — See comments at the top of `scripts/vertex_job_pre_encode.yaml` (`europe-west4`).
 
-Update `stable_audio_tools/configs/dataset_configs/pre_encoded_f1_3s.json` to set the correct mount path if different from `/mnt/gcs/pre_encoded_3s/`.
+*Optional (debug only):* you can run `pre_encode.py` with `gcs_f1_3s_pre_encode.json` and ADC on a GPU machine. That is not the supported production path for this project.
 
-### Step 3 — Fine-tune the DiT
+### Step 2 — DiT fine-tune on Vertex (or local GPU)
+
+- **On Vertex:** After `gs://$BUCKET/pre_encoded_3s/` exists, submit `scripts/vertex_job_f1_3s.yaml` in `europe-west4` (same `f1-trainer` image). The job `gsutil rsync`s latents to the VM disk, runs `torchrun`, then syncs checkpoints back to GCS.
+
+- **On a self-managed machine** (GCE, bare metal) with a GPU, use `pre_encoded_f1_3s.json` with a **local** path to latents. Vertex containers **do not** use `gcsfuse` (FUSE is unavailable unprivileged), so a VM-only flow may use `gcsfuse` with `gcp_train_f1_3s.sh` or copy latents to disk.
+
+### Step 3 — (Optional) Fine-tune locally
 
 ```bash
 python3 train.py \
@@ -171,6 +161,8 @@ python3 train.py \
     --num-workers 8
 ```
 
+Point `pre_encoded_f1_3s.json` at a local directory that mirrors the layout produced by the Vertex pre-encode job.
+
 ### Step 4 — Unwrap the checkpoint
 
 ```bash
@@ -183,35 +175,35 @@ Output: `models/foundation1_3s/foundation1_3s_step50k.safetensors`
 
 ---
 
-## Vertex AI Launch
+## Vertex AI launch
 
-### Option A — gcloud CLI
+**Image:** all jobs use the same Artifact Registry name: `europe-west4-docker.pkg.dev/winter-quanta-457022-s0/dnl-training/f1-trainer:latest` (build with `gcloud builds submit`, not local `docker push` to `gcr.io`).
+
+**Region:** `europe-west4` (see the comments in each `scripts/vertex_job_*.yaml` file).
+
+**Secrets / env at submit time:** set `GCS_BUCKET`, `HUGGINGFACE_TOKEN`, ClearML keys, and the like in a **private** YAML (or patch the `env` block) immediately before you run `gcloud ai custom-jobs create` — the checked-in files use placeholders and empty token fields on purpose.
+
+### Pre-encode, then training
 
 ```bash
-# Set your project and bucket
-export PROJECT_ID="your-gcp-project-id"
-export GCS_BUCKET="your-gcs-bucket"
+gcloud config set project winter-quanta-457022-s0
 
-# Build and push the Docker image
-docker build -t gcr.io/${PROJECT_ID}/f1-training:latest .
-docker push gcr.io/${PROJECT_ID}/f1-training:latest
-
-# Update the YAML with your values
-sed -i "s/YOUR_GCS_BUCKET_NAME/${GCS_BUCKET}/g" scripts/vertex_job_f1_3s.yaml
-
-# Submit the job
+# 1) Pre-encode (after image build; edit YAML for bucket + env first)
 gcloud ai custom-jobs create \
-    --region=us-central1 \
-    --display-name=foundation1-3s-finetune \
-    --config=scripts/vertex_job_f1_3s.yaml
+  --region=europe-west4 \
+  --display-name=dnl-f1-pre-encode-$(date +%Y%m%d) \
+  --config=scripts/vertex_job_pre_encode.yaml
+
+# 2) DiT fine-tuning (after gs://$BUCKET/pre_encoded_3s/ exists)
+gcloud ai custom-jobs create \
+  --region=europe-west4 \
+  --display-name=foundation1-3s-finetune \
+  --config=scripts/vertex_job_f1_3s.yaml
 ```
 
-### Option B — All-in-one script
+### Option — VM helper script (not Vertex)
 
-```bash
-export GCS_BUCKET="your-gcs-bucket"
-bash scripts/gcp_train_f1_3s.sh
-```
+`scripts/gcp_train_f1_3s.sh` is aimed at a **FUSE-capable** GPU host (e.g. self-managed GCE), not Vertex. Prefer the YAML custom jobs for cloud training.
 
 ---
 

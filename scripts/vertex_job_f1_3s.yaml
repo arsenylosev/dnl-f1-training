@@ -8,11 +8,11 @@
 #   2. Base checkpoint in GCS: gs://YOUR_BUCKET/checkpoints/stable-audio-open-1.0.ckpt
 #
 #   Option A (recommended — ~5 min startup):
-#     Build and push your Docker image first (see Dockerfile):
-#       gcloud auth configure-docker europe-west4-docker.pkg.dev
-#       docker build -t europe-west4-docker.pkg.dev/YOUR_PROJECT/dnl/f1-training:latest .
-#       docker push europe-west4-docker.pkg.dev/YOUR_PROJECT/dnl/f1-training:latest
-#     Set imageUri below to your image URI.
+#     Build and push your Docker image (Cloud Build, same image as pre-encode):
+#       gcloud builds submit \
+#         --tag europe-west4-docker.pkg.dev/PROJECT_ID/dnl-training/f1-trainer:latest \
+#         --machine-type e2-highcpu-32 --timeout 3600 --async .
+#     Set imageUri below to that URI (this repo standardizes on image name f1-trainer).
 #
 #   Option B (no Docker build — ~15 min startup):
 #     Use the commented-out DLVM imageUri. The inline bootstrap block
@@ -33,6 +33,10 @@
 # Monitor:
 #   gcloud ai custom-jobs list --region=europe-west4
 #   gcloud ai custom-jobs stream-logs JOB_ID --region=europe-west4
+#
+# Secrets (HUGGINGFACE_TOKEN, ClearML, etc.):
+#   Prefer a private copy of this YAML with env values set, or patch the env block
+#   right before submit — do not commit tokens. Same pattern for training as pre-encode.
 # =============================================================================
 
 workerPoolSpecs:
@@ -49,8 +53,8 @@ workerPoolSpecs:
       bootDiskSizeGb: 500
 
     containerSpec:
-      # ── Option A: Pre-built image (recommended) ────────────────────────────
-      imageUri: "europe-west4-docker.pkg.dev/YOUR_PROJECT_ID/dnl/f1-training:latest"
+      # ── Option A: Pre-built image (recommended) — must match f1-trainer in Artifact Registry
+      imageUri: "europe-west4-docker.pkg.dev/winter-quanta-457022-s0/dnl-training/f1-trainer:latest"
 
       # ── Option B: Public DLVM base image (uncomment + comment out Option A) ─
       # imageUri: "us-docker.pkg.dev/deeplearning-platform-release/gcr.io/pytorch-gpu.2-1.py310:latest"

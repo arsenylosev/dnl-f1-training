@@ -10,9 +10,9 @@
 #   Build and push your Docker image first (see Dockerfile):
 #     gcloud auth configure-docker europe-west4-docker.pkg.dev
 #     gcloud builds submit \
-#       --tag europe-west4-docker.pkg.dev/YOUR_PROJECT_ID/dnl-training/f1-trainer:latest \
-#       --machine-type e2-highcpu-32 --timeout 3600 .
-#   Then replace all YOUR_* placeholders below.
+#       --tag europe-west4-docker.pkg.dev/winter-quanta-457022-s0/dnl-training/f1-trainer:latest \
+#       --machine-type e2-highcpu-32 --timeout 3600 --async .
+#   Then replace all YOUR_* placeholders below. Image name f1-trainer is canonical for this repo.
 #
 # Quota check (before submitting):
 #   gcloud compute regions describe europe-west4 --project=YOUR_PROJECT_ID \
@@ -73,7 +73,7 @@ workerPoolSpecs:
       bootDiskSizeGb: 500
 
     containerSpec:
-      imageUri: "europe-west4-docker.pkg.dev/YOUR_PROJECT_ID/dnl-training/f1-trainer:latest"
+      imageUri: "europe-west4-docker.pkg.dev/winter-quanta-457022-s0/dnl-training/f1-trainer:latest"
 
       # Entry point: mount GCS, locate checkpoint, run pre_encode.py
       # FIX 3: The inline 'python -c "..." ' blocks had multi-line Python
