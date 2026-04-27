@@ -171,10 +171,13 @@ wandb/*
 generations/*
 !generations/*.txt
 
-models/*
-!models/*.txt
-!models/**/*.json
-!models/**/*.sh
+# Must be root-anchored. A bare `models/*` is interpreted by gcloud (builds
+# submit) like `**/models/*` and excludes stable_audio_tools/models — breaking
+# Docker/Cloud Build. Same pattern is root-only in git when leading `/` is used.
+/models/*
+!/models/*.txt
+!/models/**/*.json
+!/models/*.sh
 
 venv_upstream_style/
 

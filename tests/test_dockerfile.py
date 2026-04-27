@@ -17,6 +17,8 @@ DOCKERIGNORE = (REPO_ROOT / ".dockerignore").read_text()
 DOCKERIGNORE_LINES = [
     l.split("#", 1)[0].rstrip() for l in DOCKERIGNORE.splitlines()
 ]
+GITIGNORE = (REPO_ROOT / ".gitignore").read_text()
+GCLOUDIGNORE = (REPO_ROOT / ".gcloudignore").read_text()
 
 
 # ── Base image ──────────────────────────────────────────────────────────────
@@ -37,6 +39,18 @@ class TestDockerignore:
                 f"Use /data/ and /models/ (root-anchored), not {line!r} — see "
                 "comment in .dockerignore"
             )
+
+    def test_gitignore_models_rule_is_root_anchored(self):
+        """gcloud builds submit applies .gitignore; bare models/* drops package code."""
+        # Must not have unanchored `models/*` (excludes stable_audio_tools/models/ in gcloud)
+        for line in GITIGNORE.splitlines():
+            s = line.split("#", 1)[0].strip()
+            if s in ("models/*", "models/"):
+                pytest.fail(
+                    "Use /models/ (root-anchored) in .gitignore — see comment there"
+                )
+        assert "/models/*" in GITIGNORE, "Root /models/* pattern required for gcloud"
+        assert "stable_audio_tools" in GCLOUDIGNORE, ".gcloudignore should backstop package"
 
 
 class TestBaseImage:

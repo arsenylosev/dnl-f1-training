@@ -1,0 +1,12 @@
+# gcloud builds submit / deploy — which paths are omitted from the source tar.
+# See: https://cloud.google.com/sdk/gcloud/reference/topic/gcloudignore
+#
+# Inherit project ignore rules, then force-include the Python package (backstop;
+# root-anchored /models/ in .gitignore is the main fix for stable_audio_tools).
+
+.gcloudignore
+.git
+
+#!include:.gitignore
+
+!stable_audio_tools/**
