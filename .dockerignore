@@ -22,9 +22,11 @@ venv/
 .venv/
 env/
 .env/
-opt/
+/opt/
 
 # Model weights (large binary files — mount from GCS at runtime instead)
+# NOTE: Use /models/ (root-anchored). A bare "models/" matches ANY path named
+# models, including stable_audio_tools/models/ — which would omit the package.
 *.ckpt
 *.safetensors
 *.pt
@@ -32,12 +34,13 @@ opt/
 *.bin
 *.h5
 *.hdf5
-models/
+/models/
 
 # Pre-encoded latents (large — stored in GCS)
+# NOTE: /data/ is root-anchored. Bare "data/" also matched stable_audio_tools/data/.
 pre_encoded_3s/
 latents/
-data/
+/data/
 
 # Logs and checkpoints
 *.log

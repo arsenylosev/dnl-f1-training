@@ -26,8 +26,10 @@ dynamic = ["dependencies"]
 where = ["."]
 include = ["stable_audio_tools*"]
 
-[tool.setuptools.dynamic]
-dependencies = {file = []}
+# Do not add [tool.setuptools.dynamic] dependencies = {file = []} (or other
+# empty file lists): pip's PEP 517 build then resolves dependencies incorrectly
+# and "pip install /workspace/ --no-deps" for this project can fail. Dynamic
+# dependencies for [project] are supplied from setup.py install_requires.
 
 # ---------------------------------------------------------------------------
 # Pytest configuration

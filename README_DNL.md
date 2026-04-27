@@ -77,6 +77,30 @@ The prompt format follows the Foundation-1 tagging schema:
 
 ## Setup
 
+### Python version, CI, and the training image
+
+| Environment | Python | Notes |
+|---------------|--------|--------|
+| **Vertex / Docker** (`Dockerfile`, NGC `pytorch:24.04`) | **3.10** | Fixed by the base image; matches production training. |
+| **GitHub Actions** (`.github/workflows/ci.yml` `lint-and-test`) | **3.11** | Fast structural tests (`pytest` excluding the long Docker build). |
+| **GCE / bare metal** (`scripts/bootstrap_vm.sh`, `setup_python_env.sh`) | **3.11** default | Override with `PYTHON_VERSION=3.10` if you need to match the container exactly. |
+
+The upstream `README.md` still says to use only Python 3.10; that was written before this fork **relaxed** the `scipy` pin for 3.11 wheels. This fork’s **supported** local/CI range is **3.10 and 3.11** (see [ADR-001: Python and package management](docs/decisions/001-python-and-package-management.md)).
+
+**Optional: `uv` for local installs** — You can use [uv](https://github.com/astral-sh/uv) to create a venv and install faster; it does **not** replace the `pip` + `requirements/*.txt` path used in Docker/Vertex. Example:
+
+```bash
+uv venv -p 3.11
+source .venv/bin/activate   # or: .venv\Scripts\activate on Windows
+uv pip install -U pip setuptools wheel
+# Install torch the same way as in scripts/setup_python_env.sh (CUDA or CPU), then:
+uv pip install -r requirements/base.txt
+# ... encode.txt / train.txt as needed
+uv pip install -e . --no-deps
+```
+
+A full `uv`/`uv.lock`-only workflow would duplicate or move metadata out of `setup.py`; we are not doing that until CI and the Docker build are switched together (see the ADR).
+
 ### 1. Clone this repository
 
 ```bash

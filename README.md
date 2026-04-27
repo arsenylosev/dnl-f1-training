@@ -58,6 +58,8 @@ cd RC-stable-audio-tools
 
 Use **Python 3.10**. Newer versions (e.g. 3.11+) can fail dependency resolution due to pinned packages (notably older SciPy wheels).
 
+> **DNL / `dnl-f1-training` fork:** this fork relaxes the SciPy pin, tests on **Python 3.11** in CI, and documents **3.10 (Docker) vs 3.11 (VM scripts)**. See [README_DNL.md](README_DNL.md) and [docs/decisions/001-python-and-package-management.md](docs/decisions/001-python-and-package-management.md) — the paragraph above is **upstream** guidance, not the whole story for this repository.
+
 #### 🌐 Create a Virtual Environment
 
 It's recommended to use a virtual environment to manage dependencies:

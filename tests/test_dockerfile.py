@@ -13,9 +13,31 @@ import pytest
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 DOCKERFILE = (REPO_ROOT / "Dockerfile").read_text()
 DOCKERFILE_LINES = DOCKERFILE.splitlines()
+DOCKERIGNORE = (REPO_ROOT / ".dockerignore").read_text()
+DOCKERIGNORE_LINES = [
+    l.split("#", 1)[0].rstrip() for l in DOCKERIGNORE.splitlines()
+]
 
 
 # ── Base image ──────────────────────────────────────────────────────────────
+
+class TestDockerignore:
+    """.dockerignore must not drop stable_audio_tools/{data,models} from the context.
+
+    Unanchored ``data/`` and ``models/`` match *any* directory with that name
+    in the build context (like .gitignore), so they used to exclude the package
+    tree and break ``pip install /workspace/`` and the Dockerfile copy step.
+    """
+
+    def test_data_and_models_patterns_are_root_anchored(self):
+        for line in DOCKERIGNORE_LINES:
+            if not line or line.strip().startswith("!"):
+                continue
+            assert line not in ("data/", "data", "models/", "models"), (
+                f"Use /data/ and /models/ (root-anchored), not {line!r} — see "
+                "comment in .dockerignore"
+            )
+
 
 class TestBaseImage:
     """Validate the FROM instruction."""
