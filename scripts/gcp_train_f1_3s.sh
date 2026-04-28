@@ -141,37 +141,20 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# STEP 3 — Mount pre-encoded latents from GCS (gcsfuse)
+# STEP 3 — Copy pre-encoded latents from GCS (same path as Vertex training job)
 # ---------------------------------------------------------------------------
-# The pre_encoded dataset type expects a local path. We mount the GCS directory
-# containing the .npy + .json files using gcsfuse.
-#
-# Alternative: gsutil -m rsync -r ${PRE_ENCODED_GCS} ${PRE_ENCODED_LOCAL}
-# Use rsync if gcsfuse is not available or if you prefer a local copy.
+# stable_audio_tools/configs/dataset_configs/pre_encoded_f1_3s.json uses
+# path "/workspace/pre_encoded_3s" — mirror Vertex (gsutil rsync), not gcsfuse
+# (Vertex unprivileged containers cannot use FUSE).
 
-MOUNT_POINT="/mnt/gcs/pre_encoded_3s"
-mkdir -p "${MOUNT_POINT}"
+PRE_ENCODED_TRAIN_LOCAL="/workspace/pre_encoded_3s"
+mkdir -p "${PRE_ENCODED_TRAIN_LOCAL}"
 
-if ! mountpoint -q "${MOUNT_POINT}"; then
-    echo ""
-    echo "=== Step 3: Mounting GCS pre-encoded latents via gcsfuse ==="
-    # gcsfuse 2.0+ uses a config file for cache settings.
-    # --stat-cache-ttl and --type-cache-ttl are deprecated; use metadata-cache.ttl-secs.
-    mkdir -p /tmp/gcsfuse-cache
-    cat > /tmp/gcsfuse-train-config.yaml << 'GCSFUSE_CFG'
-metadata-cache:
-  ttl-secs: 3600
-  stat-cache-max-size-mb: 32
-GCSFUSE_CFG
-    gcsfuse \
-        --only-dir "pre_encoded_3s" \
-        --implicit-dirs \
-        --config-file /tmp/gcsfuse-train-config.yaml \
-        "${GCS_BUCKET}" "${MOUNT_POINT}"
-    echo "Mounted gs://${GCS_BUCKET}/pre_encoded_3s at ${MOUNT_POINT}"
-else
-    echo "GCS already mounted at ${MOUNT_POINT}"
-fi
+echo ""
+echo "=== Step 3: Syncing pre-encoded latents from GCS → ${PRE_ENCODED_TRAIN_LOCAL} ==="
+gsutil -m rsync -r "${PRE_ENCODED_GCS}/" "${PRE_ENCODED_TRAIN_LOCAL}/"
+echo "Latent files:"
+find "${PRE_ENCODED_TRAIN_LOCAL}" -name '*.npy' 2>/dev/null | wc -l
 
 # ---------------------------------------------------------------------------
 # STEP 4 — Fine-tune the DiT

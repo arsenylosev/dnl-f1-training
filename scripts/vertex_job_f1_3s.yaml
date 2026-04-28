@@ -97,7 +97,8 @@ workerPoolSpecs:
 
           echo "=== [2/7] Verifying environment ==="
           # Ensure stable_audio_tools is registered in site-packages (idempotent, <5 s).
-          pip install --no-cache-dir --no-deps /workspace/ -q
+          # --ignore-installed: see vertex_job_pre_encode.yaml (image lacks RECORD in dist-info)
+          pip install --no-cache-dir --no-deps --ignore-installed /workspace/ -q
           python3 -c "import torch, torchaudio, soundfile, pytorch_lightning as pl; \
             import stable_audio_tools; \
             print('PyTorch ' + torch.__version__ + ' | PL ' + pl.__version__); \
@@ -153,6 +154,15 @@ workerPoolSpecs:
 
           echo "=== [6/7] Starting DiT fine-tuning ==="
           cd /workspace
+          if [[ ! -f models/foundation1_3s/model_config_3s.json ]]; then
+            echo "FATAL: missing models/foundation1_3s/model_config_3s.json — rebuild f1-trainer (see ci/Dockerfile.context-verify)." >&2
+            exit 1
+          fi
+          DS_PRE="stable_audio_tools/configs/dataset_configs/pre_encoded_f1_3s.json"
+          if [[ ! -f "$DS_PRE" ]]; then
+            echo "FATAL: missing ${DS_PRE} — rebuild f1-trainer." >&2
+            exit 1
+          fi
           torchrun \
             --nproc_per_node="${NUM_GPUS}" \
             --nnodes=1 \
@@ -160,7 +170,7 @@ workerPoolSpecs:
             train.py \
             --model-config models/foundation1_3s/model_config_3s.json \
             --pretrained-ckpt-path "${CKPT_LOCAL}" \
-            --dataset-config stable_audio_tools/configs/dataset_configs/pre_encoded_f1_3s.json \
+            --dataset-config "${DS_PRE}" \
             --save-dir /workspace/checkpoints/f1_3s/ \
             --name foundation1-3s-finetune \
             --num-nodes 1 \

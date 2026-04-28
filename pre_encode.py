@@ -11,7 +11,8 @@ from torch.nn import functional as F
 from stable_audio_tools.data.dataset import create_dataloader_from_config
 from stable_audio_tools.models.factory import create_model_from_config
 from stable_audio_tools.models.pretrained import get_pretrained_model
-from stable_audio_tools.models.utils import load_ckpt_state_dict, copy_state_dict
+from stable_audio_tools.models.utils import load_ckpt_state_dict
+from stable_audio_tools.training.utils import copy_state_dict
 from stable_audio_tools.training.clearml_tracking import (
     init_clearml_pre_encode_task,
     ClearMLPreEncodeCallback,

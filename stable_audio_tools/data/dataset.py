@@ -1,4 +1,5 @@
 import importlib
+import json
 import numpy as np
 import io
 import os
@@ -15,7 +16,7 @@ from aeiou.core import is_silence
 from os import path
 from pedalboard.io import AudioFile
 from torchaudio import transforms as T
-from typing import Optional, Callable, List
+from typing import Optional, Callable, List, Tuple
 
 from .utils import Stereo, Mono, PhaseFlipper, PadCrop_Normalized_T
 
@@ -227,6 +228,68 @@ class SampleDataset(torch.utils.data.Dataset):
         except Exception as e:
             print(f'Couldn\'t load file {audio_filename}: {e}')
             return self[random.randrange(len(self))]
+
+
+class PreEncodedLatentsDataset(torch.utils.data.Dataset):
+    """Loads VAE latents + metadata from ``pre_encode.py`` output (``.npy`` + ``.json`` pairs).
+
+    Expected layout (under each *root_path*): nested directories with ``rank/*/*.npy`` and sibling ``.json``,
+    as written by :class:`pre_encode.PreEncodedLatentsInferenceWrapper`.
+    """
+
+    def __init__(self, root_path: str, dataset_id: str = "latents"):
+        super().__init__()
+        self.root_path = root_path
+        self.dataset_id = dataset_id
+        self.pairs: List[Tuple[str, str]] = []
+        for dirpath, _, filenames in os.walk(root_path):
+            for fn in filenames:
+                if not fn.endswith(".npy"):
+                    continue
+                stem = fn[:-4]
+                npy_p = os.path.join(dirpath, fn)
+                json_p = os.path.join(dirpath, stem + ".json")
+                if os.path.isfile(json_p):
+                    self.pairs.append((npy_p, json_p))
+        self.pairs.sort()
+        print(
+            f"PreEncodedLatentsDataset [{dataset_id}]: {len(self.pairs)} latent files under {root_path}"
+        )
+        assert len(self.pairs) > 0, (
+            f"No .npy+.json pairs found under {root_path} — check gsutil rsync from "
+            "gs://BUCKET/pre_encoded_3s/ and pre_encode completion."
+        )
+
+    def __len__(self):
+        return len(self.pairs)
+
+    def __getitem__(self, idx: int):
+        npy_p, json_p = self.pairs[idx]
+        try:
+            arr = np.load(npy_p)
+            arr = np.squeeze(arr)
+            if arr.ndim != 2:
+                raise ValueError(f"Expected 2D latent [channels, time] after squeeze, got {arr.shape}")
+            latent = torch.from_numpy(arr.astype(np.float32, copy=False))
+
+            with open(json_p, "r", encoding="utf-8") as f:
+                info = json.load(f)
+
+            if "text" in info and "prompt" not in info:
+                info["prompt"] = info["text"]
+
+            info.pop("audio", None)
+
+            if "padding_mask" in info:
+                info["padding_mask"] = torch.tensor(
+                    info["padding_mask"], dtype=torch.float32
+                )
+
+            return latent, info
+        except Exception as e:
+            print(f"Couldn't load pre-encoded sample {npy_p}: {e}")
+            return self[random.randrange(len(self))]
+
 
 def group_by_keys(data, keys=wds.tariterators.base_plus_ext, lcase=True, suffixes=None, handler=None):
     """Return function over iterator that groups key, value pairs into samples.
@@ -638,6 +701,33 @@ def create_dataloader_from_config(dataset_config, batch_size, sample_size, sampl
             train_set = gcs_datasets[0]
         else:
             train_set = torch.utils.data.ConcatDataset(gcs_datasets)
+        return torch.utils.data.DataLoader(
+            train_set,
+            batch_size,
+            shuffle=True,
+            num_workers=num_workers,
+            persistent_workers=num_workers > 0,
+            pin_memory=True,
+            drop_last=True,
+            collate_fn=collation_fn,
+        )
+
+    elif dataset_type == "pre_encoded":
+        pe_configs = dataset_config.get("datasets", None)
+        assert pe_configs is not None, 'datasets must be specified for pre_encoded dataset type'
+
+        pe_sets = []
+        for pe_cfg in pe_configs:
+            root = pe_cfg.get("path", None)
+            assert root is not None, "path must be set for each pre_encoded dataset entry"
+            ds_id = pe_cfg.get("id", "latents")
+            pe_sets.append(PreEncodedLatentsDataset(root_path=root, dataset_id=ds_id))
+
+        if len(pe_sets) == 1:
+            train_set = pe_sets[0]
+        else:
+            train_set = torch.utils.data.ConcatDataset(pe_sets)
+
         return torch.utils.data.DataLoader(
             train_set,
             batch_size,

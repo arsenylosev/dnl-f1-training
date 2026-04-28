@@ -119,15 +119,23 @@ class TestNoEditableInstall:
 
 
 class TestHuggingFaceToken:
-    """HUGGINGFACE_TOKEN must be in the env block for gated model access."""
+    """Gated HF fallback must be discoverable: env var and/or documented in YAML.
+
+    Vertex Custom Jobs reject ``env`` entries with an empty ``value``, so we do not
+    ship ``HUGGINGFACE_TOKEN: \"\"`` — operators inject the token at submit time when
+    the checkpoint is not already in GCS.
+    """
 
     @pytest.mark.parametrize("yaml_file", YAML_FILES)
-    def test_huggingface_token_in_env(self, yaml_file):
+    def test_huggingface_token_in_env_or_documented(self, yaml_file):
+        text = (REPO_ROOT / yaml_file).read_text()
         data = load_yaml(yaml_file)
         container = data["workerPoolSpecs"][0]["containerSpec"]
         env_list = container.get("env", [])
         env_names = [e["name"] for e in env_list if "name" in e]
-        assert "HUGGINGFACE_TOKEN" in env_names, (
-            f"{yaml_file}: HUGGINGFACE_TOKEN missing from env — "
-            "gated HuggingFace models will fail with 401"
+        if "HUGGINGFACE_TOKEN" in env_names:
+            return
+        assert "HUGGINGFACE_TOKEN" in text, (
+            f"{yaml_file}: mention HUGGINGFACE_TOKEN for HF gated fallback, or add it "
+            "to env when submitting (empty values are invalid on Vertex)."
         )

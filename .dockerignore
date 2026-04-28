@@ -34,7 +34,10 @@ env/
 *.bin
 *.h5
 *.hdf5
-/models/
+# Exclude root models/ except checked-in JSON (weights stay on GCS; pre_encode needs the config).
+/models/**
+!/models/foundation1_3s/
+!/models/foundation1_3s/model_config_3s.json
 
 # Pre-encoded latents (large — stored in GCS)
 # NOTE: /data/ is root-anchored. Bare "data/" also matched stable_audio_tools/data/.

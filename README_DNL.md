@@ -166,7 +166,9 @@ For production, **pre-encoding is done only on Google Cloud** via the custom job
 
 - **On Vertex:** After `gs://$BUCKET/pre_encoded_3s/` exists, submit `scripts/vertex_job_f1_3s.yaml` in `europe-west4` (same `f1-trainer` image). The job `gsutil rsync`s latents to the VM disk, runs `torchrun`, then syncs checkpoints back to GCS.
 
-- **On a self-managed machine** (GCE, bare metal) with a GPU, use `pre_encoded_f1_3s.json` with a **local** path to latents. Vertex containers **do not** use `gcsfuse` (FUSE is unavailable unprivileged), so a VM-only flow may use `gcsfuse` with `gcp_train_f1_3s.sh` or copy latents to disk.
+- **On a self-managed machine:** `scripts/gcp_train_f1_3s.sh` syncs latents to `/workspace/pre_encoded_3s` with `gsutil rsync` (same layout as Vertex). Override `datasets[0].path` in a **copy** of `pre_encoded_f1_3s.json` if your latents live elsewhere.
+
+Design rationale for the loader, paths, and `training.pre_encoded`: [ADR-002: Pre-encoded latent training](docs/decisions/002-pre-encoded-latent-training.md).
 
 ### Step 3 — (Optional) Fine-tune locally
 
@@ -276,6 +278,8 @@ scripts/
     unwrap_checkpoint.sh                         ← Checkpoint → .safetensors
 Dockerfile                                       ← Training container
 README_DNL.md                                    ← This file
+docs/decisions/
+    002-pre-encoded-latent-training.md           ← ADR (pre-encoded DiT training)
 ```
 
 ---

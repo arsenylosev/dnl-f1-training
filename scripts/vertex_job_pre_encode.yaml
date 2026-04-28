@@ -93,7 +93,9 @@ workerPoolSpecs:
           # Dockerfile now uses regular (non-editable) install — files are copied
           # directly into site-packages/ (no .pth pointer). Re-running is
           # idempotent and takes <5 s.
-          pip install --no-cache-dir --no-deps /workspace/ -q
+          # --ignore-installed: image dist-info has no RECORD; plain pip would fail
+          #   with "Cannot uninstall stable-audio-tools" / uninstall-no-record-file.
+          pip install --no-cache-dir --no-deps --ignore-installed /workspace/ -q
           python3 -c "import torch, torchaudio, soundfile, librosa, pytorch_lightning as pl; \
             import stable_audio_tools; \
             print('PyTorch ' + torch.__version__ + ' | torchaudio ' + torchaudio.__version__ + ' | PL ' + pl.__version__); \
@@ -156,6 +158,16 @@ workerPoolSpecs:
 
           echo "=== [4/5] Running VAE pre-encoding ==="
           cd /workspace
+          for p in \
+            models/foundation1_3s/model_config_3s.json \
+            stable_audio_tools/configs/dataset_configs/gcs_f1_3s_pre_encode.json \
+          ; do
+            if [[ ! -f "$p" ]]; then
+              echo "FATAL: missing ${p} in container — wrong Docker context (.dockerignore) or stale image." >&2
+              echo "Fix: rebuild f1-trainer; locally run: docker build -f ci/Dockerfile.context-verify ." >&2
+              exit 1
+            fi
+          done
           python3 pre_encode.py \
             --model-config models/foundation1_3s/model_config_3s.json \
             --ckpt-path "${CKPT_LOCAL}" \
@@ -192,14 +204,14 @@ workerPoolSpecs:
         - name: NUM_WORKERS
           value: "8"                              # 12 vCPUs available; leave 4 for OS
 
-        # ── HuggingFace (required only if checkpoint is NOT already in GCS) ─────
-        # stable-audio-open-1.0 is a gated model. To use the HF fallback:
-        #   1. Accept license: https://huggingface.co/stabilityai/stable-audio-open-1.0
-        #   2. Create read token: https://huggingface.co/settings/tokens
-        #   3. Set the value below.
-        # Leave empty ("") if the checkpoint is already in GCS (recommended).
-        - name: HUGGINGFACE_TOKEN
-          value: ""                               # YOUR_HF_READ_TOKEN or leave empty
+        # ── HuggingFace (only if checkpoint is NOT in GCS; see startup script) ─
+        # Vertex AI rejects env entries with an empty `value` — do NOT add
+        #   - name: HUGGINGFACE_TOKEN
+        #     value: ""
+        # If the HF download path is needed, append after NUM_WORKERS, e.g.:
+        #   - name: HUGGINGFACE_TOKEN
+        #     value: "hf_..."   # read token; license accepted on huggingface.co
+        # Recommended: upload stable-audio-open-1.0.ckpt to GCS so this is never required.
 
         # ── ClearML experiment tracking (optional) ────────────────────────────
         # Leave empty string to disable. Best practice: inject from Secret Manager.

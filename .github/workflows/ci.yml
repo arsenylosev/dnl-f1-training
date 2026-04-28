@@ -15,6 +15,12 @@
 #      - Builds the image and runs the sanity check
 #      - Only triggered on pushes to main (not PRs) to save CI minutes
 #
+# CI gap (fixed for PRs): Previously, PRs only ran pytest — not Docker — so a bad
+# .dockerignore could merge green while Vertex failed with FileNotFoundError for
+# models/foundation1_3s/model_config_3s.json. The lightweight
+# ci/Dockerfile.context-verify build runs on every PR and fails if that path is
+# excluded from the Docker context (same rules as Cloud Build).
+#
 # To run tests locally:
 #   pip install pytest pyyaml
 #   pytest tests/ -v
@@ -57,6 +63,14 @@ jobs:
             --tb=short \
             --no-header
 
+      - name: Verify Docker context includes F1 model config (same as Cloud Build)
+        run: |
+          docker build \
+            -f ci/Dockerfile.context-verify \
+            --progress=plain \
+            -t dnl-f1-context-verify:ci \
+            .
+
   # ─── Job 2: Docker build (main branch only) ────────────────────────────
   docker-build:
     runs-on: ubuntu-latest
@@ -95,6 +109,19 @@ jobs:
           from stable_audio_tools.models.factory import create_model_from_config;
           print('stable_audio_tools.models.factory: OK')
           "
+
+      - name: Verify Vertex pre-encode paths exist in image
+        run: |
+          docker run --rm dnl-f1-training:ci-test \
+            bash -c '
+              set -euo pipefail
+              test -f /workspace/models/foundation1_3s/model_config_3s.json
+              test -f /workspace/stable_audio_tools/configs/dataset_configs/gcs_f1_3s_pre_encode.json
+              test -f /workspace/stable_audio_tools/configs/dataset_configs/pre_encoded_f1_3s.json
+              python3 -c "import json; json.load(open(\"/workspace/models/foundation1_3s/model_config_3s.json\"))"
+              python3 -c "import json; d=json.load(open(\"/workspace/models/foundation1_3s/model_config_3s.json\")); assert d['training'].get('pre_encoded')==True"
+              echo "Vertex training / pre-encode artifact paths: OK"
+            '
 
       - name: Verify all critical imports
         run: |

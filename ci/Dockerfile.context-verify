@@ -1,0 +1,7 @@
+# Fast CI guard: fails if .dockerignore excludes these paths from the build context.
+# Full `Dockerfile` uses COPY . /workspace — same context rules apply on GitHub and Cloud Build.
+# Build: docker build -f ci/Dockerfile.context-verify .
+#
+# syntax=docker/dockerfile:1
+FROM scratch
+COPY models/foundation1_3s/model_config_3s.json /model_config_3s.json
