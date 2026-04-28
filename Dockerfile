@@ -152,14 +152,16 @@ RUN curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
 #
 # Install order:
 #   a) pip/setuptools/wheel upgrade
-#   b) GCS + experiment tracking (light deps, install first)
-#   c) requirements/base.txt  (audio libs, transformers, diffusion utils)
-#   d) requirements/encode.txt (pytorch-lightning, torchmetrics)
-#   e) requirements/train.txt  (deepspeed, bitsandbytes)
-#   f) torch==2.6.0 + torchaudio==2.6.0 + torchvision==0.21.0 pinned to cu124.
-#      The NGC PyPI index now serves torch 2.11+cu130 (CUDA 13.0 nightly),
-#      which requires driver >= 570.  Vertex AI A100 VMs ship driver 525.x
-#      (CUDA 12.3), so we override with the stable cu124 wheel instead.
+#   b) GCS + experiment tracking (light deps)
+#   c) torch==2.6.0 + torchaudio==2.6.0 + torchvision==0.21.0 from cu124 FIRST.
+#      encode.txt / train.txt pull pytorch-lightning, which depends on torch>=2.1.
+#      If torch is not pinned yet, pip resolves to torch 2.11 + CUDA 13 stacks from
+#      PyPI — gigabytes extra, then replaced by (d), producing pip "dependency
+#      conflicts" with leftover NGC torchtext/torchvision and risking OOM during
+#      Kaniko snapshot (exit 137).
+#   d) requirements/base.txt
+#   e) requirements/encode.txt (pytorch-lightning — sees torch already satisfied)
+#   f) requirements/train.txt (deepspeed, bitsandbytes)
 
 COPY requirements/ /workspace/requirements/
 
@@ -172,20 +174,15 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
         "huggingface_hub>=0.20.0" \
         "safetensors>=0.4.0" \
     \
-    && pip install --no-cache-dir -r /workspace/requirements/base.txt \
-    && pip install --no-cache-dir -r /workspace/requirements/encode.txt \
-    && pip install --no-cache-dir -r /workspace/requirements/train.txt \
-    \
-    # Pin torch/torchaudio to stable CUDA 12.4 builds.
-    # The NGC PyPI index (pypi.ngc.nvidia.com) now serves torch 2.11+cu130
-    # (CUDA 13.0 nightly), which requires driver >= 570 — not available on
-    # Vertex AI A100 VMs.  We override with the stable cu124 wheel from
-    # download.pytorch.org, which needs driver >= 525.60 (satisfied).
     && pip install --no-cache-dir \
         "torch==2.6.0" \
         "torchaudio==2.6.0" \
         "torchvision==0.21.0" \
         --index-url https://download.pytorch.org/whl/cu124 \
+    \
+    && pip install --no-cache-dir -r /workspace/requirements/base.txt \
+    && pip install --no-cache-dir -r /workspace/requirements/encode.txt \
+    && pip install --no-cache-dir -r /workspace/requirements/train.txt \
     \
     && find /usr/local/lib/python3.10 -name '*.pyc' -delete \
     && find /usr/local/lib/python3.10 -name '__pycache__' -type d -empty -delete
