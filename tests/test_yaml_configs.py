@@ -114,7 +114,8 @@ class TestNoEditableInstall:
             if "pip install" in stripped and "-e " in stripped:
                 pytest.fail(
                     f"{yaml_file} line {i+1}: editable install found — "
-                    "use 'pip install --no-deps /workspace/' instead"
+                    "the image installs stable_audio_tools via Dockerfile (site-packages); "
+                    "verify with python imports, not pip install -e"
                 )
 
 

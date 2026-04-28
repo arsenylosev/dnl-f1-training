@@ -217,6 +217,8 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
 COPY . /workspace/
 
 RUN SITE_PKGS=$(python3 -c "import site; print(site.getsitepackages()[0])") \
+    && test -f /workspace/setup.py && test -f /workspace/pyproject.toml || \
+         (echo "FATAL: setup.py or pyproject.toml missing from build context — check .dockerignore / gcloud upload" >&2; exit 1) \
     # Ensure we replace any pre-existing site-packages copy (avoids cp nesting)
     && rm -rf "${SITE_PKGS}/stable_audio_tools" \
     && test -f /workspace/stable_audio_tools/models/factory.py || \

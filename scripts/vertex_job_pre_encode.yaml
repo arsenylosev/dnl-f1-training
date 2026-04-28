@@ -89,13 +89,9 @@ workerPoolSpecs:
           set -euo pipefail
 
           echo "=== [1/5] Verifying environment ==="
-          # Ensure stable_audio_tools is registered in site-packages.
-          # Dockerfile now uses regular (non-editable) install — files are copied
-          # directly into site-packages/ (no .pth pointer). Re-running is
-          # idempotent and takes <5 s.
-          # --ignore-installed: image dist-info has no RECORD; plain pip would fail
-          #   with "Cannot uninstall stable-audio-tools" / uninstall-no-record-file.
-          pip install --no-cache-dir --no-deps --ignore-installed /workspace/ -q
+          # stable_audio_tools is copied into site-packages at image build (Dockerfile).
+          # Do not run `pip install /workspace/` — /workspace may omit setup.py/pyproject.toml
+          # (minimal build contexts) while site-packages still has the package.
           python3 -c "import torch, torchaudio, soundfile, librosa, pytorch_lightning as pl; \
             import stable_audio_tools; \
             print('PyTorch ' + torch.__version__ + ' | torchaudio ' + torchaudio.__version__ + ' | PL ' + pl.__version__); \
@@ -222,9 +218,9 @@ workerPoolSpecs:
         - name: CLEARML_API_SECRET_KEY
           value: "YOUR_CLEARML_SECRET_KEY"
         - name: CLEARML_PROJECT
-          value: "Foundation-1 / DNL"
+          value: "AI Synthesizer"
         - name: CLEARML_TASK_NAME
-          value: "pre-encode-3s"
+          value: "Foundation-1 Pre-Encode (initial train)"
 
 # =============================================================================
 # Cost estimate (europe-west4, April 2026):
