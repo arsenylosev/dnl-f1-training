@@ -116,8 +116,9 @@ jobs:
             bash -c '
               set -euo pipefail
               test -f /workspace/models/foundation1_3s/model_config_3s.json
-              test -f /workspace/stable_audio_tools/configs/dataset_configs/gcs_f1_3s_pre_encode.json
-              test -f /workspace/stable_audio_tools/configs/dataset_configs/pre_encoded_f1_3s.json
+              DATASET_CONFIG_DIR="$(python3 -c "import stable_audio_tools, pathlib; print(pathlib.Path(stable_audio_tools.__file__).resolve().parent / \"configs\" / \"dataset_configs\")")"
+              test -f "${DATASET_CONFIG_DIR}/gcs_f1_3s_pre_encode.json"
+              test -f "${DATASET_CONFIG_DIR}/pre_encoded_f1_3s.json"
               python3 -c "import json; json.load(open(\"/workspace/models/foundation1_3s/model_config_3s.json\"))"
               python3 -c "import json; d=json.load(open(\"/workspace/models/foundation1_3s/model_config_3s.json\")); assert d['training'].get('pre_encoded')==True"
               echo "Vertex training / pre-encode artifact paths: OK"

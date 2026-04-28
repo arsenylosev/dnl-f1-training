@@ -5,3 +5,5 @@
 # syntax=docker/dockerfile:1
 FROM scratch
 COPY models/foundation1_3s/model_config_3s.json /model_config_3s.json
+COPY stable_audio_tools/configs/dataset_configs/gcs_f1_3s_pre_encode.json /gcs_f1_3s_pre_encode.json
+COPY stable_audio_tools/configs/dataset_configs/pre_encoded_f1_3s.json /pre_encoded_f1_3s.json
