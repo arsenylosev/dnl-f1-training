@@ -154,9 +154,11 @@ workerPoolSpecs:
 
           echo "=== [4/5] Running VAE pre-encoding ==="
           cd /workspace
+          DATASET_CONFIG_PATH="$(python3 -c "import stable_audio_tools, pathlib; print(pathlib.Path(stable_audio_tools.__file__).resolve().parent / 'configs' / 'dataset_configs' / 'gcs_f1_3s_pre_encode.json')")"
+          echo "Resolved dataset config: ${DATASET_CONFIG_PATH}"
           for p in \
             models/foundation1_3s/model_config_3s.json \
-            stable_audio_tools/configs/dataset_configs/gcs_f1_3s_pre_encode.json \
+            "${DATASET_CONFIG_PATH}" \
           ; do
             if [[ ! -f "$p" ]]; then
               echo "FATAL: missing ${p} in container — wrong Docker context (.dockerignore) or stale image." >&2
@@ -167,7 +169,7 @@ workerPoolSpecs:
           python3 pre_encode.py \
             --model-config models/foundation1_3s/model_config_3s.json \
             --ckpt-path "${CKPT_LOCAL}" \
-            --dataset-config stable_audio_tools/configs/dataset_configs/gcs_f1_3s_pre_encode.json \
+            --dataset-config "${DATASET_CONFIG_PATH}" \
             --output-path /workspace/pre_encoded_3s/ \
             --sample-size "${SAMPLE_SIZE}" \
             --batch-size "${BATCH_SIZE}" \
@@ -190,7 +192,7 @@ workerPoolSpecs:
       env:
         # ── Required ──────────────────────────────────────────────────────────
         - name: GCS_BUCKET
-          value: "YOUR_GCS_BUCKET_NAME"          # e.g. dnl-audio-training
+          value: "your-bucket-name"          # e.g. dnl-audio-training
 
         # ── Pre-encoding hyperparameters ──────────────────────────────────────
         - name: SAMPLE_SIZE
