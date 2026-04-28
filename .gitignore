@@ -176,6 +176,8 @@ generations/*
 # Docker/Cloud Build. Same pattern is root-only in git when leading `/` is used.
 /models/*
 !/models/*.txt
+# Un-ignore this directory first; otherwise `!/models/**/*.json` never applies (parent excluded).
+!/models/foundation1_3s/
 !/models/**/*.json
 !/models/*.sh
 
