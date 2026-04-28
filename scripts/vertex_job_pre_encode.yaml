@@ -210,7 +210,7 @@ workerPoolSpecs:
         # Recommended: upload stable-audio-open-1.0.ckpt to GCS so this is never required.
 
         # ── ClearML experiment tracking (optional) ────────────────────────────
-        # Leave empty string to disable. Best practice: inject from Secret Manager.
+        # Leave YOUR_* placeholders; inject real values at submit time (do not commit secrets).
         - name: CLEARML_API_HOST
           value: "https://api.clear.ml"
         - name: CLEARML_API_ACCESS_KEY

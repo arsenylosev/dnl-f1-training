@@ -185,6 +185,8 @@ venv_upstream_style/
 
 # GCS / training artifacts (DNL additions)
 pre_encoded_*/
+# Local Vertex job overlays with real env values (never commit secrets)
+scripts/*.local.yaml
 service_account*.json
 gcloud_credentials*.json
 *.npy
