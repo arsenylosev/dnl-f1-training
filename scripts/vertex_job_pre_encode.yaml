@@ -152,13 +152,36 @@ workerPoolSpecs:
             gsutil -m cp "${CKPT_LOCAL}" "${CKPT_GCS}" || true
           fi
 
+          echo "=== [3b/5] Locating CLAP checkpoint ==="
+          CLAP_LOCAL="/workspace/clap.ckpt"
+          CLAP_GCS="${CLAP_CKPT_GCS}"
+          if [ -f "${CLAP_LOCAL}" ]; then
+            echo "CLAP checkpoint already present at ${CLAP_LOCAL}"
+          elif gsutil -q stat "${CLAP_GCS}" 2>/dev/null; then
+            echo "Downloading CLAP checkpoint from ${CLAP_GCS} ..."
+            gsutil -m cp "${CLAP_GCS}" "${CLAP_LOCAL}"
+            echo "CLAP checkpoint downloaded: ${CLAP_LOCAL}"
+          else
+            echo "ERROR: CLAP checkpoint not found at ${CLAP_GCS}" >&2
+            echo "Upload a CLAP checkpoint and set CLAP_CKPT_GCS accordingly." >&2
+            echo "Example: gsutil cp music_audioset_epoch_15_esc_90.14.pt gs://\${GCS_BUCKET}/checkpoints/clap.ckpt" >&2
+            exit 1
+          fi
+          echo "Verifying CLAP checkpoint compatibility (HTSAT-base, fusion=true)..."
+          python3 -c "import laion_clap; from laion_clap.clap_module.factory import load_state_dict as clap_load_state_dict; m = laion_clap.CLAP_Module(enable_fusion=True, amodel='HTSAT-base', device='cpu'); sd = clap_load_state_dict('${CLAP_LOCAL}'); m.model.load_state_dict(sd, strict=False); print('CLAP checkpoint load: OK (${CLAP_LOCAL})')"
+
           echo "=== [4/5] Running VAE pre-encoding ==="
           cd /workspace
           DATASET_CONFIG_PATH="$(python3 -c "import stable_audio_tools, pathlib; print(pathlib.Path(stable_audio_tools.__file__).resolve().parent / 'configs' / 'dataset_configs' / 'gcs_f1_3s_pre_encode.json')")"
+          echo "Updating dataset config with GCS_BUCKET=${GCS_BUCKET} ..."
+          python3 -c "import json; from pathlib import Path; cfg = json.load(open('${DATASET_CONFIG_PATH}')); [ds.update({'bucket': '${GCS_BUCKET}'}) for ds in cfg.get('datasets', [])]; json.dump(cfg, open('${DATASET_CONFIG_PATH}', 'w'), indent=2); print('Dataset config updated: ' + ', '.join([ds['id'] + '->' + ds['bucket'] for ds in cfg['datasets']]))"
+          MODEL_CONFIG_RUNTIME="/tmp/model_config_pre_encode_runtime.json"
+          python3 -c "import json; from pathlib import Path; src = Path('models/foundation1_3s/model_config_3s.json'); cfg = json.loads(src.read_text()); [c.setdefault('config', {}).update({'clap_ckpt_path': '${CLAP_LOCAL}'}) for c in cfg.get('model', {}).get('conditioning', {}).get('configs', []) if c.get('type') in ('clap_text', 'clap_audio')]; Path('${MODEL_CONFIG_RUNTIME}').write_text(json.dumps(cfg)); print('Runtime model config written to ${MODEL_CONFIG_RUNTIME}')"
           echo "Resolved dataset config: ${DATASET_CONFIG_PATH}"
           for p in \
-            models/foundation1_3s/model_config_3s.json \
+            "${MODEL_CONFIG_RUNTIME}" \
             "${DATASET_CONFIG_PATH}" \
+            "${CLAP_LOCAL}" \
           ; do
             if [[ ! -f "$p" ]]; then
               echo "FATAL: missing ${p} in container — wrong Docker context (.dockerignore) or stale image." >&2
@@ -167,7 +190,7 @@ workerPoolSpecs:
             fi
           done
           python3 pre_encode.py \
-            --model-config models/foundation1_3s/model_config_3s.json \
+            --model-config "${MODEL_CONFIG_RUNTIME}" \
             --ckpt-path "${CKPT_LOCAL}" \
             --dataset-config "${DATASET_CONFIG_PATH}" \
             --output-path /workspace/pre_encoded_3s/ \
@@ -201,6 +224,8 @@ workerPoolSpecs:
           value: "32"                             # Safe for A100 40GB at 3s / 64 tokens
         - name: NUM_WORKERS
           value: "8"                              # 12 vCPUs available; leave 4 for OS
+        - name: CLAP_CKPT_GCS
+          value: "gs://dnl-ml-data/checkpoints/clap.ckpt"  # Update to your uploaded CLAP checkpoint object
 
         # ── HuggingFace (only if checkpoint is NOT in GCS; see startup script) ─
         # Vertex AI rejects env entries with an empty `value` — do NOT add
@@ -213,8 +238,13 @@ workerPoolSpecs:
 
         # ── ClearML experiment tracking (optional) ────────────────────────────
         # Leave YOUR_* placeholders; inject real values at submit time (do not commit secrets).
+        # For self-hosted ClearML server, you need ALL of these hosts configured:
         - name: CLEARML_API_HOST
           value: "https://api.clear.ml"
+        - name: CLEARML_WEB_HOST
+          value: "https://app.clear.ml"
+        - name: CLEARML_FILES_HOST
+          value: "https://files.clear.ml"
         - name: CLEARML_API_ACCESS_KEY
           value: "YOUR_CLEARML_ACCESS_KEY"
         - name: CLEARML_API_SECRET_KEY

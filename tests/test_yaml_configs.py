@@ -140,3 +140,24 @@ class TestHuggingFaceToken:
             f"{yaml_file}: mention HUGGINGFACE_TOKEN for HF gated fallback, or add it "
             "to env when submitting (empty values are invalid on Vertex)."
         )
+
+
+class TestClapCheckpointWiring:
+    """Pre-encode job must provide CLAP checkpoint and patch placeholder path."""
+
+    def test_pre_encode_yaml_has_clap_checkpoint_env(self):
+        yaml_file = "scripts/vertex_job_pre_encode.yaml"
+        data = load_yaml(yaml_file)
+        container = data["workerPoolSpecs"][0]["containerSpec"]
+        env_names = [e["name"] for e in container.get("env", []) if "name" in e]
+        assert "CLAP_CKPT_GCS" in env_names, (
+            f"{yaml_file}: add CLAP_CKPT_GCS env so Step 4 can fetch CLAP weights"
+        )
+
+    def test_pre_encode_yaml_patches_runtime_clap_path(self):
+        yaml_file = "scripts/vertex_job_pre_encode.yaml"
+        text = (REPO_ROOT / yaml_file).read_text()
+        assert "MODEL_CONFIG_RUNTIME" in text and "clap_ckpt_path" in text, (
+            f"{yaml_file}: must patch model config clap_ckpt_path at runtime "
+            "to avoid '/path/to/clap.ckpt' placeholder failures"
+        )

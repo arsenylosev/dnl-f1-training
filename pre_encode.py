@@ -148,8 +148,7 @@ def main(args):
         num_workers=args.num_workers,
         sample_rate=model_config["sample_rate"],
         sample_size=args.sample_size,
-        audio_channels=model_config.get("audio_channels", 2),
-        shuffle=args.shuffle
+        audio_channels=model_config.get("audio_channels", 2)
     )
 
     pl_module = PreEncodedLatentsInferenceWrapper(

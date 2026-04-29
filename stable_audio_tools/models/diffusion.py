@@ -213,6 +213,16 @@ class ConditionedDiffusionModelWrapper(nn.Module):
     def generate(self, *args, **kwargs):
         return generate_diffusion_cond(self, *args, **kwargs)
 
+    def encode(self, x: torch.Tensor, **kwargs):
+        """
+        Encode audio to latents.
+        For diffusion models with a pretransform, the pretransform encodes the audio.
+        """
+        if self.pretransform is not None:
+            with torch.no_grad():
+                x = self.pretransform.encode(x)
+        return x
+
 class UNetCFG1DWrapper(ConditionedDiffusionModel):
     def __init__(
         self,

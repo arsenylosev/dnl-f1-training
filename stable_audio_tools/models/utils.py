@@ -1,4 +1,5 @@
 import torch
+import pickle
 from safetensors.torch import load_file
 
 from torch.nn.utils import remove_weight_norm
@@ -7,7 +8,26 @@ def load_ckpt_state_dict(ckpt_path):
     if ckpt_path.endswith(".safetensors"):
         state_dict = load_file(ckpt_path)
     else:
-        state_dict = torch.load(ckpt_path, map_location="cpu")["state_dict"]
+        try:
+            obj = torch.load(ckpt_path, map_location="cpu")
+        except pickle.UnpicklingError:
+            # PyTorch 2.6 defaults to weights_only=True. Many legacy training
+            # checkpoints include non-tensor pickled metadata, so reload with
+            # weights_only=False for trusted checkpoint files.
+            try:
+                obj = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+            except Exception:
+                # Some pipelines cache safetensors with a non-.safetensors
+                # suffix (e.g. *.ckpt). Fall back to safetensors parser.
+                obj = load_file(ckpt_path)
+        except Exception:
+            # Non-pickle formats (or mislabeled files) should still be
+            # loadable when they are safetensors.
+            obj = load_file(ckpt_path)
+        if isinstance(obj, dict) and "state_dict" in obj:
+            state_dict = obj["state_dict"]
+        else:
+            state_dict = obj
     
     return state_dict
 
