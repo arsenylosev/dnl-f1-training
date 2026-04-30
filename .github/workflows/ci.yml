@@ -113,16 +113,17 @@ jobs:
       - name: Verify Vertex pre-encode paths exist in image
         run: |
           docker run --rm dnl-f1-training:ci-test \
-            bash -c '
-              set -euo pipefail
-              test -f /workspace/models/foundation1_3s/model_config_3s.json
-              DATASET_CONFIG_DIR="$(python3 -c "import stable_audio_tools, pathlib; print(pathlib.Path(stable_audio_tools.__file__).resolve().parent / \"configs\" / \"dataset_configs\")")"
-              test -f "${DATASET_CONFIG_DIR}/gcs_f1_3s_pre_encode.json"
-              test -f "${DATASET_CONFIG_DIR}/pre_encoded_f1_3s.json"
-              python3 -c "import json; json.load(open(\"/workspace/models/foundation1_3s/model_config_3s.json\"))"
-              python3 -c "import json; d=json.load(open(\"/workspace/models/foundation1_3s/model_config_3s.json\")); assert d['training'].get('pre_encoded')==True"
-              echo "Vertex training / pre-encode artifact paths: OK"
-            '
+            python3 -c "
+          import json, pathlib, stable_audio_tools;
+          cfg_dir = pathlib.Path(stable_audio_tools.__file__).resolve().parent / 'configs' / 'dataset_configs';
+          assert (pathlib.Path('/workspace/models/foundation1_3s/model_config_3s.json')).is_file(), 'model_config_3s.json missing';
+          assert (cfg_dir / 'gcs_f1_3s_pre_encode.json').is_file(), 'gcs_f1_3s_pre_encode.json missing';
+          assert (cfg_dir / 'pre_encoded_f1_3s.json').is_file(), 'pre_encoded_f1_3s.json missing';
+          d = json.loads(pathlib.Path('/workspace/models/foundation1_3s/model_config_3s.json').read_text());
+          assert d.get('training', {}).get('pre_encoded') is True, 'training.pre_encoded must be True';
+          print('Vertex pre-encode artifact paths: OK')
+          "
+
 
       - name: Verify all critical imports
         run: |
