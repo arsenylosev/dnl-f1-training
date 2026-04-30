@@ -6,6 +6,8 @@
 #   1. Pre-encoding complete: gs://YOUR_BUCKET/pre_encoded_3s/ must exist.
 #      Run vertex_job_pre_encode.yaml first.
 #   2. Base checkpoint in GCS: gs://YOUR_BUCKET/checkpoints/stable-audio-open-1.0.ckpt
+#   3. CLAP checkpoint in GCS: gs://YOUR_BUCKET/checkpoints/clap.ckpt
+#      (e.g., music_audioset_epoch_15_esc_90.14.pt renamed to clap.ckpt)
 #
 #   Option A (recommended — ~5 min startup):
 #     Build and push your Docker image (Cloud Build, same image as pre-encode):
@@ -138,6 +140,34 @@ workerPoolSpecs:
               print('Downloaded to ${CKPT_LOCAL}')"
           fi
 
+          echo "=== [4b/7] Locating CLAP checkpoint ==="
+          CLAP_LOCAL="/workspace/clap.ckpt"
+          CLAP_GCS="gs://${GCS_BUCKET}/checkpoints/clap.ckpt"
+
+          if [ -f "${CLAP_LOCAL}" ]; then
+            echo "CLAP checkpoint already present at ${CLAP_LOCAL}"
+          elif gsutil -q stat "${CLAP_GCS}" 2>/dev/null; then
+            echo "Downloading CLAP checkpoint from GCS..."
+            gsutil -m cp "${CLAP_GCS}" "${CLAP_LOCAL}"
+            echo "CLAP checkpoint downloaded: ${CLAP_LOCAL}"
+          else
+            echo "ERROR: CLAP checkpoint not found at ${CLAP_GCS}" >&2
+            echo "Upload a CLAP checkpoint and ensure CLAP_CKPT_GCS is set correctly." >&2
+            echo "Example: gsutil cp music_audioset_epoch_15_esc_90.14.pt gs://\${GCS_BUCKET}/checkpoints/clap.ckpt" >&2
+            exit 1
+          fi
+
+          echo "=== [4c/7] Patching model config with CLAP path ==="
+          MODEL_CONFIG_PATCHED="/tmp/model_config_3s_runtime.json"
+          python3 -c "import json; from pathlib import Path; \
+            src = Path('models/foundation1_3s/model_config_3s.json'); \
+            cfg = json.loads(src.read_text()); \
+            [c.setdefault('config', {}).update({'clap_ckpt_path': '${CLAP_LOCAL}'}) \
+              for c in cfg.get('model', {}).get('conditioning', {}).get('configs', []) \
+              if c.get('type') == 'clap_text']; \
+            Path('${MODEL_CONFIG_PATCHED}').write_text(json.dumps(cfg)); \
+            print('Runtime model config written to ${MODEL_CONFIG_PATCHED}')"
+
           echo "=== [5/7] Checking for resume checkpoint ==="
           RESUME_FLAG=""
           LATEST_CKPT=$(gsutil ls "gs://${GCS_BUCKET}/checkpoints/f1_3s/*.ckpt" 2>/dev/null \
@@ -157,6 +187,10 @@ workerPoolSpecs:
             echo "FATAL: missing models/foundation1_3s/model_config_3s.json — rebuild f1-trainer (see ci/Dockerfile.context-verify)." >&2
             exit 1
           fi
+          if [[ ! -f "${MODEL_CONFIG_PATCHED}" ]]; then
+            echo "FATAL: missing ${MODEL_CONFIG_PATCHED} — CLAP patching failed." >&2
+            exit 1
+          fi
           DS_PRE="stable_audio_tools/configs/dataset_configs/pre_encoded_f1_3s.json"
           if [[ ! -f "$DS_PRE" ]]; then
             echo "FATAL: missing ${DS_PRE} — rebuild f1-trainer." >&2
@@ -167,7 +201,7 @@ workerPoolSpecs:
             --nnodes=1 \
             --node_rank=0 \
             train.py \
-            --model-config models/foundation1_3s/model_config_3s.json \
+            --model-config "${MODEL_CONFIG_PATCHED}" \
             --pretrained-ckpt-path "${CKPT_LOCAL}" \
             --dataset-config "${DS_PRE}" \
             --save-dir /workspace/checkpoints/f1_3s/ \
@@ -209,8 +243,8 @@ workerPoolSpecs:
         #   2. Create read token: https://huggingface.co/settings/tokens
         #   3. Set the value below.
         # Leave empty ("") if the checkpoint is already in GCS (recommended).
-        - name: HUGGINGFACE_TOKEN
-          value: ""                               # YOUR_HF_READ_TOKEN or leave empty
+        # - name: HUGGINGFACE_TOKEN
+        #   value: ""                               # YOUR_HF_READ_TOKEN or leave empty
 
         # ── ClearML experiment tracking (optional) ────────────────────────────
         - name: CLEARML_API_HOST
@@ -220,15 +254,15 @@ workerPoolSpecs:
         - name: CLEARML_API_SECRET_KEY
           value: "YOUR_CLEARML_SECRET_KEY"
         - name: CLEARML_PROJECT
-          value: "Foundation-1 / DNL"
+          value: "AI Synthesizer"
         - name: CLEARML_TASK_NAME
-          value: "finetune-3s"
+          value: "Foundation-1 Finetune (initial train)"
 
         # ── W&B tracking (optional) ───────────────────────────────────────────
         - name: WANDB_API_KEY
           value: "YOUR_WANDB_API_KEY"
         - name: WANDB_PROJECT
-          value: "foundation1-3s"
+          value: "AI-Synthesizer"
 
     # ── Spot VM (optional — ~65% cost reduction) ──────────────────────────────
     # Vertex AI auto-retries up to 6 times on preemption.

@@ -98,10 +98,10 @@
             "demo_steps": 250,
             "num_demos": 4,
             "demo_cond": [
-                {"prompt": "A beautiful piano arpeggio", "seconds_start": 0, "seconds_total": 3},
-                {"prompt": "A tropical house track with upbeat melodies", "seconds_start": 0, "seconds_total": 3},
-                {"prompt": "A cool 80s glam rock song with driving drums", "seconds_start": 0, "seconds_total": 3},
-                {"prompt": "A grand orchestral arrangement with cinematic atmosphere", "seconds_start": 0, "seconds_total": 3}
+                {"prompt": "An analog synth pad rich in harmonics, creating an immersive and dynamic soundscape.", "seconds_start": 0, "seconds_total": 3},
+                {"prompt": "An analog synth bass dry, fat, minimalist with a transient-focused reverb effect.", "seconds_start": 0, "seconds_total": 3},
+                {"prompt": "A sharp, crisp-edged percussive sound, resonant and dynamic, sets the stage for a rhythmic pattern in a trance track.", "seconds_start": 0, "seconds_total": 3},
+                {"prompt": "A bold-toned, sharp-sounding, analog-synthesized lead with a 80s-inspired analog quality is present.", "seconds_start": 0, "seconds_total": 3}
             ],
             "demo_cfg_scales": [3, 6, 9]
         }

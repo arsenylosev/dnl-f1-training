@@ -106,7 +106,7 @@ workerPoolSpecs:
           mkdir -p /workspace/audio
           echo "Syncing gs://${GCS_BUCKET}/training_datasets/ → /workspace/audio/ ..."
           gsutil -m rsync -r \
-            "gs://${GCS_BUCKET}/training_datasets/" \
+            "gs://${GCS_BUCKET}/training_datasets/f1_initial/" \
             /workspace/audio/
           echo "Sync complete. Files:"
           find /workspace/audio -name '*.wav' | wc -l
@@ -252,7 +252,7 @@ workerPoolSpecs:
         - name: CLEARML_PROJECT
           value: "AI Synthesizer"
         - name: CLEARML_TASK_NAME
-          value: "Foundation-1 Pre-Encode (initial train)"
+          value: "Foundation-1 Pre-Encode (initial train, full data)"
 
 # =============================================================================
 # Cost estimate (europe-west4, April 2026):
