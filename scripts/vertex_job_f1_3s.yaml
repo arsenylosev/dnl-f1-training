@@ -22,9 +22,15 @@
 #
 # Quota check:
 #   gcloud compute regions describe europe-west4 --project=YOUR_PROJECT_ID \
-#     | grep -A2 'NVIDIA_H100'
-#   Request at: console.cloud.google.com/iam-admin/quotas
-#   Filter: NVIDIA_H100_80GB_GPUS, region: europe-west4, request value: 2
+#     | grep -A2 'NVIDIA_L4'
+#   L4 GPUs are widely available in europe-west4-b without a special quota request.
+#   g2-standard-48 provides 2× L4 (24 GB VRAM each) + 48 vCPU + 192 GB RAM.
+#
+#   Alternative (more VRAM, still no H100 quota needed):
+#     machineType: a2-highgpu-1g   # 1× A100 40GB, 12 vCPU, 85 GB RAM
+#     acceleratorType: NVIDIA_TESLA_A100
+#     acceleratorCount: 1
+#     Also update NUM_GPUS=1 and BATCH_SIZE=16 in the env block below.
 #
 # Submit:
 #   gcloud ai custom-jobs create \
@@ -43,9 +49,13 @@
 
 workerPoolSpecs:
   - machineSpec:
-      # a3-highgpu-2g: 2× H100 80GB, 52 vCPU, 234 GB RAM, 200 Gbps NIC
-      machineType: a3-highgpu-2g
-      acceleratorType: NVIDIA_H100_80GB
+      # g2-standard-48: 2× L4 24GB, 48 vCPU, 192 GB RAM
+      # Available in europe-west4-b without special quota.
+      # Cost: ~$2.50/hr per L4 on-demand vs ~$11.76/hr per H100 — ~5× cheaper.
+      # Spot pricing: ~$0.87/hr per L4 — ~14× cheaper than H100 on-demand.
+      # L4 has 24 GB VRAM vs H100's 80 GB; batch size is reduced accordingly.
+      machineType: g2-standard-48
+      acceleratorType: NVIDIA_L4
       acceleratorCount: 2
 
     replicaCount: 1
@@ -231,11 +241,14 @@ workerPoolSpecs:
         - name: NUM_GPUS
           value: "2"                             # Must match acceleratorCount above
         - name: BATCH_SIZE
-          value: "16"                            # Per-GPU; effective batch = 16×2 = 32
+          value: "8"                             # Per-GPU; L4 has 24 GB vs H100's 80 GB.
+                                                 # Effective batch = 8×2 = 16.
+                                                 # Increase gradient_accumulation_steps
+                                                 # in model_config_3s.json to compensate.
         - name: NUM_WORKERS
-          value: "8"                             # 52 vCPUs available; leave headroom
+          value: "6"                             # 48 vCPUs available; leave headroom
         - name: PRECISION
-          value: "16-mixed"                      # bf16-mixed also supported on H100
+          value: "16-mixed"                      # bf16-mixed also supported on L4
 
         # ── HuggingFace (required only if checkpoint is NOT already in GCS) ─────
         # stable-audio-open-1.0 is a gated model. To use the HF fallback:
@@ -273,9 +286,19 @@ workerPoolSpecs:
 
 # =============================================================================
 # Cost estimate (europe-west4, April 2026):
-#   a3-highgpu-2g on-demand: ~$23.94/hr (incl. Vertex AI management fee)
-#   a3-highgpu-2g spot:       ~$8.37/hr (incl. Vertex AI management fee)
 #
-#   Minimal viable run (~72h): $1,724 on-demand | $603 spot
-#   Multi-family run (~360h):  $8,618 on-demand | $3,013 spot
+#   g2-standard-48 (2× L4) on-demand: ~$5.00/hr  (incl. Vertex AI management fee)
+#   g2-standard-48 (2× L4) spot:      ~$1.74/hr  (incl. Vertex AI management fee)
+#
+#   Minimal viable run (~72h):  $360 on-demand | $125 spot
+#   Multi-family run (~360h):  $1,800 on-demand | $626 spot
+#
+#   Previous config (a3-highgpu-2g, 2× H100 80GB):
+#     On-demand: ~$23.94/hr | Spot: ~$8.37/hr
+#     Minimal viable run (~72h): $1,724 on-demand | $603 spot
+#
+#   Alternative — a2-highgpu-1g (1× A100 40GB):
+#     On-demand: ~$4.43/hr | Spot: ~$1.55/hr
+#     More VRAM (40 GB) than L4 (24 GB), useful for larger batch sizes.
+#     Update NUM_GPUS=1, BATCH_SIZE=16, acceleratorCount=1 if switching.
 # =============================================================================

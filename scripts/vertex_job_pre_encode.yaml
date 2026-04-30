@@ -17,8 +17,10 @@
 # Quota check (before submitting):
 #   gcloud compute regions describe europe-west4 --project=YOUR_PROJECT_ID \
 #     | grep -A2 'NVIDIA_A100'
-#   Request quota at: console.cloud.google.com/iam-admin/quotas
-#   Filter: NVIDIA_A100_GPUS, region: europe-west4, request value: 1
+#   A100 40GB is available in europe-west4-a and europe-west4-b without
+#   special quota. If unavailable, switch to g2-standard-16 + NVIDIA_L4 (1× L4
+#   24GB) — also available in europe-west4-b and ~40% cheaper on-demand.
+#   Update BATCH_SIZE=16 if switching to L4 (24 GB VRAM vs A100's 40 GB).
 #
 # Submit with:
 #   gcloud ai custom-jobs create \
@@ -54,14 +56,20 @@
 workerPoolSpecs:
   - machineSpec:
       # a2-highgpu-1g: 1× A100 40GB, 12 vCPU, 85 GB RAM
+      # Available in europe-west4-a and europe-west4-b without special quota.
+      # Cost: ~$4.42/hr on-demand — the most affordable option with 40 GB VRAM.
+      #
+      # Alternative (even cheaper, slightly less VRAM):
+      #   machineType: g2-standard-16   # 1× L4 24GB, 16 vCPU, 64 GB RAM
+      #   acceleratorType: NVIDIA_L4
+      #   acceleratorCount: 1
+      #   Cost: ~$1.25/hr on-demand. Update BATCH_SIZE=16 (24 GB VRAM vs 40 GB).
       machineType: a2-highgpu-1g
 
-      # FIX 2: The correct AcceleratorType enum value for A100 40GB is
-      # NVIDIA_TESLA_A100 (not NVIDIA_A100).  For A100 80GB use
-      # NVIDIA_A100_80GB.  For a2-highgpu-* machine types the accelerator
-      # is implicit in the machine type, so this field can be omitted
-      # entirely — but specifying it explicitly is valid and makes the
-      # intent clear.
+      # NVIDIA_TESLA_A100 is the correct enum for A100 40GB.
+      # For A100 80GB use NVIDIA_A100_80GB.
+      # For a2-highgpu-* the accelerator is implicit in the machine type,
+      # but specifying it explicitly is valid and makes the intent clear.
       acceleratorType: NVIDIA_TESLA_A100
       acceleratorCount: 1
 

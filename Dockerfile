@@ -74,7 +74,7 @@ RUN pip uninstall -y \
 # 1. System packages + FUSE config
 # ---------------------------------------------------------------------------
 RUN apt-get update -qq \
-    && apt-get install -y --no-install-recommends \
+    && apt-get install -y --no-install-recommends --fix-missing \
         git \
         git-lfs \
         curl \
