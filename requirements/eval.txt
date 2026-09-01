@@ -12,6 +12,12 @@ gradio>=4.0.0,<5.0.0
 frechet-audio-distance>=0.0.4
 # Note: FAD requires VGGish model weights (~500 MB download on first run)
 
+# CLAP-based instrument-accuracy proxy (eval/seed_range/score_seed_sweep.py).
+# Same library data-engineering/main_pipeline/CLAP_tagger already uses for
+# auto-tagging — reused here, not a new dependency choice. CPU-capable
+# (msclap.CLAP(use_cuda=False)), ~1.7 GB of weights on first use.
+msclap>=1.3.3
+
 # Notebook / reporting
 ipython>=8.0.0
 ipykernel>=6.0.0
